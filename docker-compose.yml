@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  mysql-dist:
+    image: mysql:8.0
+    container_name: course_mysql_node
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./db_init:/docker-entrypoint-initdb.d
+      - mysql_data:/var/lib/mysql
+    platform: linux/x86_64 
+    command: --default-authentication-plugin=mysql_native_password
+
+volumes:
+  mysql_data:
