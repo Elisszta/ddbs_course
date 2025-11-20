@@ -1,28 +1,6 @@
-aiomysql==0.3.2
-annotated-doc==0.0.4
-annotated-types==0.7.0
-anyio==4.11.0
-cffi==2.0.0
-click==8.3.1
-cryptography==46.0.3
-exceptiongroup==1.3.0
-fastapi==0.121.2
-greenlet==3.2.4
-h11==0.16.0
-httptools==0.7.1
-idna==3.11
-pycparser==2.23
-pydantic==2.12.4
-pydantic_core==2.41.5
-PyMySQL==1.1.2
-python-dotenv==1.2.1
-PyYAML==6.0.3
-sniffio==1.3.1
-SQLAlchemy==2.0.44
-starlette==0.49.3
-typing-inspection==0.4.2
-typing_extensions==4.15.0
-uvicorn==0.38.0
-uvloop==0.22.1
-watchfiles==1.1.1
-websockets==15.0.1
+fastapi[standard-no-fastapi-cloud-cli]==0.121.3 # fastapi，包括一堆依赖
+aiomysql==0.3.2 # mysql异步驱动
+SQLAlchemy==2.0.44 # orm
+python-dotenv==1.2.1 # 配置文件
+pyjwt==2.10.1 # jwt用于鉴权
+aiohttp==3.13.2 # 发送http与其他站点通信
