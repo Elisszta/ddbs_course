@@ -15,3 +15,26 @@ class CourseCreateParams(CourseUpdateParams):
 
 class CourseCreateResp(BaseModel):
     cid: int
+
+
+class CourseResp(BaseModel):
+    cid: int
+    teachers: str
+    name: str
+    capacity: int
+    num_selected: int
+    campus: Literal['A', 'B', 'C']
+
+
+class CourseQueryResp(BaseModel):
+    total: int
+    result: list[CourseResp]
+
+
+class CourseStudentResp(CourseResp):
+    is_selected: bool
+
+
+class CourseStudentQueryResp(BaseModel):
+    total: int
+    result: list[CourseStudentResp]
