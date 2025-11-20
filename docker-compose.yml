@@ -1,18 +1,111 @@
-version: '3.8'
-
 services:
-  mysql-dist:
+
+  # ========== 1 主 2 从 ==========
+  mysql-master:
     image: mysql:8.0
-    container_name: course_mysql_node
+    container_name: mysql-master
+    restart: unless-stopped
+    ports:
+      - "3310:3306"
     environment:
       MYSQL_ROOT_PASSWORD: root
-    ports:
-      - "3306:3306"
+    command:
+      - --server-id=10
+      - --log-bin=mysql-bin
+      - --binlog_format=ROW
+      - --gtid_mode=ON
+      - --enforce_gtid_consistency=ON
     volumes:
-      - ./db_init:/docker-entrypoint-initdb.d
-      - mysql_data:/var/lib/mysql
-    platform: linux/x86_64 
-    command: --default-authentication-plugin=mysql_native_password
+      - ./data/master:/var/lib/mysql
+    networks:
+      - mysql-cluster
 
-volumes:
-  mysql_data:
+  mysql-slave1:
+    image: mysql:8.0
+    container_name: mysql-slave1
+    restart: unless-stopped
+    ports:
+      - "3311:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+    command:
+      - --server-id=11
+      - --log-bin=mysql-bin
+      - --binlog_format=ROW
+      - --gtid_mode=ON
+      - --enforce_gtid_consistency=ON
+      - --read_only=1
+    volumes:
+      - ./data/slave1:/var/lib/mysql
+    networks:
+      - mysql-cluster
+
+  mysql-slave2:
+    image: mysql:8.0
+    container_name: mysql-slave2
+    restart: unless-stopped
+    ports:
+      - "3312:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+    command:
+      - --server-id=12
+      - --log-bin=mysql-bin
+      - --binlog_format=ROW
+      - --gtid_mode=ON
+      - --enforce_gtid_consistency=ON
+      - --read_only=1
+    volumes:
+      - ./data/slave2:/var/lib/mysql
+    networks:
+      - mysql-cluster
+
+  # ========== 分库分表 3 节点 ==========
+  mysql-shard0:
+    image: mysql:8.0
+    container_name: mysql-shard0
+    restart: unless-stopped
+    ports:
+      - "3320:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+    command:
+      - --server-id=20
+    volumes:
+      - ./data/shard0:/var/lib/mysql
+    networks:
+      - mysql-cluster
+
+  mysql-shard1:
+    image: mysql:8.0
+    container_name: mysql-shard1
+    restart: unless-stopped
+    ports:
+      - "3321:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+    command:
+      - --server-id=21
+    volumes:
+      - ./data/shard1:/var/lib/mysql
+    networks:
+      - mysql-cluster
+
+  mysql-shard2:
+    image: mysql:8.0
+    container_name: mysql-shard2
+    restart: unless-stopped
+    ports:
+      - "3322:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+    command:
+      - --server-id=22
+    volumes:
+      - ./data/shard2:/var/lib/mysql
+    networks:
+      - mysql-cluster
+
+networks:
+  mysql-cluster:
+    driver: bridge
