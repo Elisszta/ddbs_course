@@ -7,10 +7,18 @@ shard_engine = create_async_engine(settings.db_shard_url, echo=True)
 
 
 async def get_master_slave_connection():
+    """
+    路由函数依赖
+    :return: 本地主从库连接
+    """
     async with master_slave_engine.connect() as conn:
         yield conn
 
 
 async def get_shard_connection():
+    """
+    路由函数依赖
+    :return: 本地分片库连接
+    """
     async with shard_engine.connect() as conn:
         yield conn

@@ -41,6 +41,13 @@ class Settings(BaseSettings):
             return 'B'
         return 'C'
 
+    def current_min_cid(self) -> int:
+        if self.campus_a_web_url is None:
+            return 1000000
+        if self.campus_b_web_url is None:
+            return 1100000
+        return 1200000
+
 
 # 实例化Settings对象
 settings = Settings()
