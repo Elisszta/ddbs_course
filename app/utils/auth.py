@@ -4,6 +4,7 @@ import jwt
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
+from app.models.generic_error import err_no_permission, err_invalid_token, err_expired_token, err_invalid_uid
 from app.models.user_model import CurUser
 from app.utils.settings import settings
 
@@ -18,7 +19,7 @@ async def verify_db_api(credentials: CredDep):
     :return:
     """
     if credentials.credentials != settings.db_api_secret:
-        raise HTTPException(status_code=403, detail='Invalid token')
+        raise HTTPException(status_code=403, detail=err_invalid_token)
 
 
 async def get_current_user(credentials: CredDep) -> CurUser:
@@ -30,14 +31,14 @@ async def get_current_user(credentials: CredDep) -> CurUser:
     try:
         payload = jwt.decode(credentials.credentials, settings.jwt_secret, algorithms=('HS256',))
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=403, detail='Expired token')
+        raise HTTPException(status_code=403, detail=err_expired_token)
     except jwt.InvalidTokenError:
-        raise HTTPException(status_code=403, detail='Invalid token')
+        raise HTTPException(status_code=403, detail=err_invalid_token)
     uid = payload.get('uid')
     if uid is None or type(uid) != int:
-        raise HTTPException(status_code=403, detail='Invalid token')
+        raise HTTPException(status_code=403, detail=err_invalid_token)
     if uid < 1000000000 or uid >= 1400000000:
-        raise HTTPException(status_code=403, detail='Invalid uid')
+        raise HTTPException(status_code=403, detail=err_invalid_uid)
     if uid < 1100000000:
         return CurUser(uid=uid, role='admin')
     if uid < 1200000000:
@@ -55,7 +56,7 @@ async def get_current_admin(cur_user: UserDep) -> CurUser:
     :return: 当前用户
     """
     if cur_user.role != 'admin':
-        raise HTTPException(status_code=403, detail='You are not allowed to perform this action')
+        raise HTTPException(status_code=403, detail=err_no_permission)
     return cur_user
 
 
@@ -66,5 +67,5 @@ async def get_current_admin_or_teacher(cur_user: UserDep) -> CurUser:
     :return: 当前用户
     """
     if cur_user.role == 'student':
-        raise HTTPException(status_code=403, detail='You are not allowed to perform this action')
+        raise HTTPException(status_code=403, detail=err_no_permission)
     return cur_user

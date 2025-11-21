@@ -12,12 +12,8 @@ async def get_master_slave_connection():
     :return: 本地主从库连接
     """
     async with master_slave_engine.connect() as conn:
-        tx = await conn.begin()
-        try:
+        async with conn.begin():
             yield conn
-            await tx.commit()
-        except Exception:
-            await tx.rollback()
 
 
 async def get_master_slave_connection_no_tx():
@@ -35,9 +31,10 @@ async def get_shard_connection():
     :return: 本地分片库连接
     """
     async with shard_engine.connect() as conn:
-        tx = await conn.begin()
-        try:
+        async with conn.begin():
             yield conn
-            await tx.commit()
-        except Exception:
-            await tx.rollback()
+
+
+async def get_shard_connection_no_tx():
+    async with shard_engine.connect() as conn:
+        yield conn
