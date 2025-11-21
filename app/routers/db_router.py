@@ -15,10 +15,10 @@ from app.utils.database import get_master_slave_connection, get_shard_connection
     get_shard_connection_no_tx
 from app.utils.settings import settings
 
-MasterSlaveConnNoTx = Annotated[AsyncConnection, Depends(get_master_slave_connection_no_tx)]
-MasterSlaveConn = Annotated[AsyncConnection, Depends(get_master_slave_connection)]
-ShardConnNoTx = Annotated[AsyncConnection, Depends(get_shard_connection_no_tx)]
-ShardConn = Annotated[AsyncConnection, Depends(get_shard_connection)]
+MasterSlaveConnNoTxDep = Annotated[AsyncConnection, Depends(get_master_slave_connection_no_tx)]
+MasterSlaveConnDep = Annotated[AsyncConnection, Depends(get_master_slave_connection)]
+ShardConnNoTxDep = Annotated[AsyncConnection, Depends(get_shard_connection_no_tx)]
+ShardConnDep = Annotated[AsyncConnection, Depends(get_shard_connection)]
 
 
 router = APIRouter(
@@ -31,7 +31,7 @@ router = APIRouter(
 
 # 删用户，要把teach表或learn表相关条目删了，如果是learn表的，对应课程已选人数要减少
 @router.delete('/users/{user_id}', status_code=204)
-async def delete_user(shard_conn: ShardConnNoTx, user_id: int):
+async def delete_user(shard_conn: ShardConnNoTxDep, user_id: int):
     """
     用户删除分库路由函数。删除用户时必须原地调用+所有远程http调用
     :param shard_conn: 本地分片库连接，不自动事务
@@ -57,7 +57,7 @@ async def delete_user(shard_conn: ShardConnNoTx, user_id: int):
 
 
 @router.post('/users/{stu_id}/select', status_code=204)
-async def select_course(master_slave_conn: MasterSlaveConn, shard_conn: ShardConn, stu_id: int, course_id: int):
+async def select_course(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, stu_id: int, course_id: int):
     """
     选课分库路由函数。若课程校区就在本地，可直接原地调用该函数
     :param master_slave_conn: 本地主从库连接
@@ -78,7 +78,7 @@ async def select_course(master_slave_conn: MasterSlaveConn, shard_conn: ShardCon
 
 
 @router.post('/users/{std_id}/deselect', status_code=204)
-async def deselect_course(master_slave_conn: MasterSlaveConn, shard_conn: ShardConn, stu_id: int, course_id: int):
+async def deselect_course(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, stu_id: int, course_id: int):
     """
     退课分库路由函数。若课程校区就在本地，可直接原地调用该函数
     :param master_slave_conn: 本地主从库连接
@@ -97,7 +97,7 @@ async def deselect_course(master_slave_conn: MasterSlaveConn, shard_conn: ShardC
 
 
 @router.get('/courses/{course_id}/students')
-async def get_course_students(master_slave_conn: MasterSlaveConnNoTx, shard_conn: ShardConn, course_id: int) -> StudentQueryResp:
+async def get_course_students(master_slave_conn: MasterSlaveConnNoTxDep, shard_conn: ShardConnDep, course_id: int) -> StudentQueryResp:
     """
     查课程学生分库路由函数。若课程校区就在本地，可直接原地调用该函数
     :param master_slave_conn: 本地主从库连接，不自动事务
@@ -150,8 +150,8 @@ async def build_course_filter_sql(master_slave_conn: AsyncConnection, course: in
 
 @router.get('/courses')
 async def get_courses(
-        master_slave_conn: MasterSlaveConnNoTx,
-        shard_conn: ShardConn,
+        master_slave_conn: MasterSlaveConnNoTxDep,
+        shard_conn: ShardConnDep,
         course: int | str | None = None,
         teacher: int | str | None = None,
         only_not_full: bool = False
@@ -192,10 +192,10 @@ async def get_courses(
     return CourseQueryResp(total=len(resp_result), result=resp_result)
 
 
-@router.get('/courses-student')
+@router.get('/courses/student')
 async def get_courses_student(
-        master_slave_conn: MasterSlaveConnNoTx,
-        shard_conn: ShardConn,
+        master_slave_conn: MasterSlaveConnNoTxDep,
+        shard_conn: ShardConnDep,
         stu_id: int,
         course: int | str | None = None,
         teacher: int | str | None = None,
@@ -257,7 +257,7 @@ async def get_courses_student(
     # ))
 
 
-async def gen_course_id(shard_conn: ShardConn) -> int | None:
+async def gen_course_id(shard_conn: ShardConnDep) -> int | None:
     min_id = settings.current_min_cid()
     result = await shard_conn.execute(text('SELECT MAX(id) FROM course'))
     max_id = result.scalar()
@@ -276,7 +276,7 @@ async def gen_course_id(shard_conn: ShardConn) -> int | None:
 
 
 @router.post('/courses', status_code=201)
-async def create_course(master_slave_conn: MasterSlaveConn, shard_conn: ShardConn, p: CourseCreateParams) -> CourseCreateResp:
+async def create_course(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, p: CourseCreateParams) -> CourseCreateResp:
     """
     课程创建分库路由函数。若课程校区就在本地，可直接原地调用该函数
     :param master_slave_conn: 本地主从库连接
@@ -309,7 +309,7 @@ async def create_course(master_slave_conn: MasterSlaveConn, shard_conn: ShardCon
 
 
 @router.delete('/courses/{course_id}', status_code=204)
-async def delete_course(shard_conn: ShardConn, course_id: int):
+async def delete_course(shard_conn: ShardConnDep, course_id: int):
     """
     课程删除分库路由函数。若课程校区就在本地，可直接原地调用该函数
     :param shard_conn: 本地分片库连接
@@ -320,7 +320,7 @@ async def delete_course(shard_conn: ShardConn, course_id: int):
 
 
 @router.put('/courses/{course_id}', status_code=204)
-async def update_course(shard_conn: ShardConn, course_id: int, p: CourseUpdateParams):
+async def update_course(shard_conn: ShardConnDep, course_id: int, p: CourseUpdateParams):
     """
     课程更新分库路由函数。若课程校区就在本地，可直接原地调用该函数
     :param shard_conn: 本地分片库连接

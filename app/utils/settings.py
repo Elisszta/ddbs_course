@@ -48,6 +48,13 @@ class Settings(BaseSettings):
             return 1100000
         return 1200000
 
+    def get_campus_web_url(self, campus: str) -> str:
+        if campus == 'A':
+            return self.campus_a_web_url
+        if campus == 'B':
+            return self.campus_b_web_url
+        return self.campus_c_web_url
+
 
 # 实例化Settings对象
 settings = Settings()
