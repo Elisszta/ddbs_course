@@ -10,11 +10,13 @@ from app.models.course_model import CourseQueryResp, CourseStudentQueryResp, Cou
 from app.models.generic_error import GenericError
 from app.models.user_model import CurUser
 from app.routers import db_router
-from app.utils.auth import get_current_user, get_current_admin
+from app.utils.auth import get_current_user, get_current_admin, get_current_admin_or_teacher, get_current_student
+from app.utils.classify_helper import get_course_campus
 from app.utils.database import get_master_slave_connection_no_tx, get_master_slave_connection, \
     get_shard_connection_no_tx, get_shard_connection
 from app.utils.remote_call import remote_call
 from app.utils.settings import settings
+
 
 MasterSlaveConnNoTxDep = Annotated[AsyncConnection, Depends(get_master_slave_connection_no_tx)]
 MasterSlaveConnDep = Annotated[AsyncConnection, Depends(get_master_slave_connection)]
@@ -22,6 +24,8 @@ ShardConnNoTxDep = Annotated[AsyncConnection, Depends(get_shard_connection_no_tx
 ShardConnDep = Annotated[AsyncConnection, Depends(get_shard_connection)]
 CurUserDep = Annotated[CurUser, Depends(get_current_user)]
 AdminDep = Annotated[CurUser, Depends(get_current_admin)]
+AdminTeacherDep = Annotated[CurUser, Depends(get_current_admin_or_teacher)]
+StudentDep = Annotated[CurUser, Depends(get_current_student)]
 
 
 router = APIRouter(
@@ -29,15 +33,6 @@ router = APIRouter(
     tags=['Course API'],
     responses={403: {'model': GenericError, 'description': 'Insufficient permission'}}
 )
-
-
-def get_course_campus(course_id: int) -> str:
-    course_campus = course_id // 10000
-    if course_campus == 10:
-        return 'A'
-    if course_campus == 11:
-        return 'B'
-    return 'C'
 
 
 @router.get('/')
@@ -83,10 +78,9 @@ async def get_courses(
     return CourseQueryResp(total=len(final_list), result=final_list)
 
 
-
 @router.get('/student')
 async def get_courses_student(
-        cur_user: CurUserDep,
+        cur_user: StudentDep,
         master_slave_conn: MasterSlaveConnNoTxDep,
         shard_conn: ShardConnDep,
         campus: set[Literal['A', 'B', 'C']] = Query(min_length=1),
@@ -95,7 +89,7 @@ async def get_courses_student(
         only_not_full: bool = False,
         only_selected: bool = False,
 ) -> CourseStudentQueryResp:
-    params = {'stu_id': cur_user.uid, 'campus': campus, 'course': course, 'teacher': teacher, 'only_not_full': only_not_full, 'only_selected': only_selected}
+    params = {'stu_id': cur_user.user_id, 'campus': campus, 'course': course, 'teacher': teacher, 'only_not_full': only_not_full, 'only_selected': only_selected}
     current_campus = settings.current_campus()
     if type(course) is int:
         # 特判课程id查询，因为课程id可以直接得出位于哪个分库
@@ -103,7 +97,7 @@ async def get_courses_student(
         if course_campus not in campus:
             return CourseStudentQueryResp(total=0, result=[])
         if course_campus == current_campus:
-            return await db_router.get_courses_student(master_slave_conn, shard_conn, cur_user.uid, course, teacher, only_not_full, only_selected)   # 本地
+            return await db_router.get_courses_student(master_slave_conn, shard_conn, cur_user.user_id, course, teacher, only_not_full, only_selected)   # 本地
         # 远程
         code, resp = await remote_call(settings.get_campus_web_url(course_campus) + '/api/private/v1/courses/student', params=params)
         if code is not None and 200 <= code < 300:
@@ -112,7 +106,7 @@ async def get_courses_student(
     # 其他情况视情况分配到远程或本地
     tasks = []
     if current_campus in campus:
-        tasks.append(db_router.get_courses_student(master_slave_conn, shard_conn, cur_user.uid, course, teacher, only_not_full, only_selected))
+        tasks.append(db_router.get_courses_student(master_slave_conn, shard_conn, cur_user.user_id, course, teacher, only_not_full, only_selected))
         campus.discard(current_campus)
     for c in campus:
         tasks.append(remote_call(settings.get_campus_web_url(c) + '/api/private/v1/courses/student', params=params))

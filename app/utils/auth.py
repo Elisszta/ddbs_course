@@ -6,6 +6,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.models.generic_error import err_no_permission, err_invalid_token, err_expired_token, err_invalid_uid
 from app.models.user_model import CurUser
+from app.utils.classify_helper import get_user_role
 from app.utils.settings import settings
 
 security = HTTPBearer()
@@ -39,11 +40,7 @@ async def get_current_user(credentials: CredDep) -> CurUser:
         raise HTTPException(status_code=403, detail=err_invalid_token)
     if uid < 1000000000 or uid >= 1400000000:
         raise HTTPException(status_code=403, detail=err_invalid_uid)
-    if uid < 1100000000:
-        return CurUser(uid=uid, role='admin')
-    if uid < 1200000000:
-        return CurUser(uid=uid, role='student')
-    return CurUser(uid=uid, role='teacher')
+    return CurUser(user_id=uid, role=get_user_role(uid))
 
 
 UserDep = Annotated[CurUser, Depends(get_current_user)]
@@ -67,5 +64,16 @@ async def get_current_admin_or_teacher(cur_user: UserDep) -> CurUser:
     :return: 当前用户
     """
     if cur_user.role == 'student':
+        raise HTTPException(status_code=403, detail=err_no_permission)
+    return cur_user
+
+
+async def get_current_student(cur_user: UserDep) -> CurUser:
+    """
+    路由函数依赖，确保当前接口只有管理员或教师才能访问
+    :param cur_user:
+    :return: 当前用户
+    """
+    if cur_user.role != 'student':
         raise HTTPException(status_code=403, detail=err_no_permission)
     return cur_user

@@ -1,9 +1,17 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone, timedelta
+from typing import Annotated
 
-from fastapi import FastAPI
+import jwt
+from fastapi import FastAPI, Depends, HTTPException
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.models.generic_error import err_invalid_uid
+from app.models.user_model import UserLoginParams, UserLoginResp
 from app.routers import db_router, course_router
-from app.utils.database import db
+from app.utils.classify_helper import get_user_role
+from app.utils.database import db, get_master_slave_connection
 from app.utils.settings import settings
 
 
@@ -16,3 +24,19 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.include_router(db_router.router)
 app.include_router(course_router.router)
+
+
+@app.post('/api/v1/login')
+async def login(master_slave_conn: Annotated[AsyncConnection, Depends(get_master_slave_connection)], p: UserLoginParams) -> UserLoginResp:
+    if p.user_id < 1000000000 or p.user_id >= 1400000000:
+        raise HTTPException(status_code=403, detail=err_invalid_uid)
+    role = get_user_role(p.user_id)
+    expire = datetime.now(timezone.utc) + timedelta(hours=24)
+    if role == 'admin':
+        encoded_jwt = jwt.encode({'exp': expire, 'uid': p.user_id}, settings.jwt_secret, algorithm='HS256')
+        return UserLoginResp(token=encoded_jwt, user_id=p.user_id, role='admin', username='admin')
+    username = (await master_slave_conn.execute(text(f'SELECT name FROM {role} WHERE id = :id'), {'id': p.user_id})).scalar()
+    if username is None:
+        raise HTTPException(status_code=403, detail=err_invalid_uid)
+    encoded_jwt = jwt.encode({'exp': expire, 'uid': p.user_id}, settings.jwt_secret, algorithm='HS256')
+    return UserLoginResp(token=encoded_jwt, user_id=p.user_id, role=role, username=username)
