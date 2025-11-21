@@ -3,12 +3,14 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncConnection
+from starlette.responses import JSONResponse
 
-from app.models.course_model import CourseQueryResp, CourseStudentQueryResp
+from app.models.course_model import CourseQueryResp, CourseStudentQueryResp, CourseCreateParams, CourseCreateResp, \
+    CourseUpdateParams
 from app.models.generic_error import GenericError
 from app.models.user_model import CurUser
 from app.routers import db_router
-from app.utils.auth import get_current_user
+from app.utils.auth import get_current_user, get_current_admin
 from app.utils.database import get_master_slave_connection_no_tx, get_master_slave_connection, \
     get_shard_connection_no_tx, get_shard_connection
 from app.utils.remote_call import remote_call
@@ -19,6 +21,7 @@ MasterSlaveConnDep = Annotated[AsyncConnection, Depends(get_master_slave_connect
 ShardConnNoTxDep = Annotated[AsyncConnection, Depends(get_shard_connection_no_tx)]
 ShardConnDep = Annotated[AsyncConnection, Depends(get_shard_connection)]
 CurUserDep = Annotated[CurUser, Depends(get_current_user)]
+AdminDep = Annotated[CurUser, Depends(get_current_admin)]
 
 
 router = APIRouter(
@@ -67,7 +70,7 @@ async def get_courses(
         tasks.append(db_router.get_courses(master_slave_conn, shard_conn, course, teacher, only_not_full))
         campus.discard(current_campus)
     for c in campus:
-        tasks.append(remote_call(settings.get_campus_web_url(c + '/api/private/v1/courses'), params=params))
+        tasks.append(remote_call(settings.get_campus_web_url(c) + '/api/private/v1/courses', params=params))
     results = await asyncio.gather(*tasks)
     final_list = []
     for result in results:
@@ -112,7 +115,7 @@ async def get_courses_student(
         tasks.append(db_router.get_courses_student(master_slave_conn, shard_conn, cur_user.uid, course, teacher, only_not_full, only_selected))
         campus.discard(current_campus)
     for c in campus:
-        tasks.append(remote_call(settings.get_campus_web_url(c + '/api/private/v1/courses/student'), params=params))
+        tasks.append(remote_call(settings.get_campus_web_url(c) + '/api/private/v1/courses/student', params=params))
     results = await asyncio.gather(*tasks)
     final_list = []
     for result in results:
@@ -124,3 +127,28 @@ async def get_courses_student(
                 final_list.extend(resp.result)
     return CourseStudentQueryResp(total=len(final_list), result=final_list)
 
+
+@router.post('/', status_code=201)
+async def create_course(cur_user: AdminDep, master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, p: CourseCreateParams) -> CourseCreateResp:
+    if p.campus == settings.current_campus():
+        return await db_router.create_course(master_slave_conn, shard_conn, p)
+    code, resp = await remote_call(settings.get_campus_web_url(p.campus) + '/api/private/v1/courses', method='POST', json=p)
+    return JSONResponse(status_code=code, content=resp)
+
+
+@router.delete('/{course_id}', status_code=204)
+async def delete_course(cur_user: AdminDep, shard_conn: ShardConnDep, course_id: int):
+    course_campus = get_course_campus(course_id)
+    if course_campus == settings.current_campus():
+        return await db_router.delete_course(shard_conn, course_id)
+    code, resp = await remote_call(settings.get_campus_web_url(course_campus) + f'/api/private/v1/courses/{course_id}', method='DELETE')
+    return JSONResponse(status_code=code, content=resp)
+
+
+@router.put('/{course_id}', status_code=204)
+async def update_course(cur_user: AdminDep, shard_conn: ShardConnDep, course_id: int, p: CourseUpdateParams):
+    course_campus = get_course_campus(course_id)
+    if course_campus == settings.current_campus():
+        return await db_router.update_course(shard_conn, course_id, p)
+    code, resp = await remote_call(settings.get_campus_web_url(course_campus) + f'/api/private/v1/courses/{course_id}', method='PUT', json=p)
+    return JSONResponse(status_code=code, content=resp)
