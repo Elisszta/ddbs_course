@@ -7,3 +7,5 @@ router = APIRouter(
     tags=['Course API'],
     responses={403: {'model': GenericError, 'description': 'Insufficient permission'}}
 )
+
+

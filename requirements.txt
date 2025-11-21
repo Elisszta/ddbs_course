@@ -1,6 +1,7 @@
 fastapi[standard-no-fastapi-cloud-cli]==0.121.3 # fastapi，包括一堆依赖
 pydantic-settings==2.10.1 # 配置读取
 aiomysql==0.3.2 # mysql异步驱动
+cryptography==46.0.3 #
 SQLAlchemy==2.0.44 # orm
 python-dotenv==1.2.1 # 配置文件
 pyjwt==2.10.1 # jwt用于鉴权

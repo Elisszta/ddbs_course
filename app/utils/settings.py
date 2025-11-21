@@ -8,9 +8,9 @@ from pydantic_settings import BaseSettings
 # DB_MASTER_SLAVE_URL 本地主从库的url
 # DB_SHARD_URL 本地分库的url
 
-# A_WEB_URL A校区web应用的url
-# B_WEB_URL B校区web应用的url
-# C_WEB_URL C校区web应用的url
+# CAMPUS_A_WEB_URL A校区web应用的url
+# CAMPUS_B_WEB_URL B校区web应用的url
+# CAMPUS_C_WEB_URL C校区web应用的url
 # 哪个留空就表示当前是哪个校区
 # 校区对应课程编号：A:10 B:11 C:12
 

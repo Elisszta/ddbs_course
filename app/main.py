@@ -1,21 +1,17 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy import text
 
-app = FastAPI()
+from app.routers import db_router
+from app.utils.database import db
+from app.utils.settings import settings
 
-# 连接到 global_master 库
-DATABASE_URL = "mysql+aiomysql://root:root@localhost:3306/global_master"
-engine = create_async_engine(DATABASE_URL, echo=True)
 
-@app.get("/")
-async def root():
-    async with engine.connect() as conn:
-        # 执行一个简单的查询
-        result = await conn.execute(text("SELECT msg FROM connection_test LIMIT 1"))
-        row = result.fetchone()
-        return {"message": f"Database says: {row[0]}"}
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await db.create_engine(settings.db_master_slave_url, settings.db_shard_url, echo=True)
+    yield
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+app = FastAPI(lifespan=lifespan)
+app.include_router(db_router.router)
