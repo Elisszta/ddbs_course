@@ -22,7 +22,7 @@ ShardConnDep = Annotated[AsyncConnection, Depends(get_shard_connection)]
 
 
 router = APIRouter(
-    prefix='/api/private/v1',
+    prefix='/api-private/v1',
     tags=['DB Cross Site API'],
     responses={403: {'model': GenericError, 'description': 'Insufficient permission'}},
     dependencies=(Depends(verify_db_api),)
@@ -56,7 +56,7 @@ async def delete_user(shard_conn: ShardConnNoTxDep, user_id: int):
                 return
 
 
-@router.post('/users/{stu_id}/select', status_code=204)
+@router.post('/courses/{course_id}/select', status_code=204)
 async def select_course(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, stu_id: int, course_id: int):
     """
     选课分库路由函数。若课程校区就在本地，可直接原地调用该函数
@@ -77,7 +77,7 @@ async def select_course(master_slave_conn: MasterSlaveConnDep, shard_conn: Shard
     await shard_conn.execute(text('INSERT INTO learn(cid, sid) VALUES (:cid, :sid)'), {'cid': course_id, 'sid': stu_id})
 
 
-@router.post('/users/{std_id}/deselect', status_code=204)
+@router.post('/courses/{course_id}/deselect', status_code=204)
 async def deselect_course(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, stu_id: int, course_id: int):
     """
     退课分库路由函数。若课程校区就在本地，可直接原地调用该函数

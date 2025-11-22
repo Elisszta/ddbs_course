@@ -1,13 +1,14 @@
 import asyncio
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 from starlette.responses import JSONResponse
 
 from app.models.course_model import CourseQueryResp, CourseStudentQueryResp, CourseCreateParams, CourseCreateResp, \
     CourseUpdateParams
-from app.models.generic_error import GenericError
+from app.models.generic_error import GenericError, err_no_permission, err_selection_time, err_bad_gateway
 from app.models.user_model import CurUser
 from app.routers import db_router
 from app.utils.auth import get_current_user, get_current_admin, get_current_admin_or_teacher, get_current_student
@@ -55,7 +56,7 @@ async def get_courses(
         if course_campus == current_campus:
             return await db_router.get_courses(master_slave_conn, shard_conn, course, teacher, only_not_full)   # 本地
         # 远程
-        code, resp = await remote_call(settings.get_campus_web_url(course_campus) + '/api/private/v1/courses', params=params)
+        code, resp = await remote_call(settings.get_campus_web_url(course_campus) + '/api-private/v1/courses', params=params)
         if code is not None and 200 <= code < 300:
             return resp
         return CourseQueryResp(total=0, result=[])
@@ -65,7 +66,7 @@ async def get_courses(
         tasks.append(db_router.get_courses(master_slave_conn, shard_conn, course, teacher, only_not_full))
         campus.discard(current_campus)
     for c in campus:
-        tasks.append(remote_call(settings.get_campus_web_url(c) + '/api/private/v1/courses', params=params))
+        tasks.append(remote_call(settings.get_campus_web_url(c) + '/api-private/v1/courses', params=params))
     results = await asyncio.gather(*tasks)
     final_list = []
     for result in results:
@@ -99,7 +100,7 @@ async def get_courses_student(
         if course_campus == current_campus:
             return await db_router.get_courses_student(master_slave_conn, shard_conn, cur_user.user_id, course, teacher, only_not_full, only_selected)   # 本地
         # 远程
-        code, resp = await remote_call(settings.get_campus_web_url(course_campus) + '/api/private/v1/courses/student', params=params)
+        code, resp = await remote_call(settings.get_campus_web_url(course_campus) + '/api-private/v1/courses/student', params=params)
         if code is not None and 200 <= code < 300:
             return resp
         return CourseStudentQueryResp(total=0, result=[])
@@ -109,7 +110,7 @@ async def get_courses_student(
         tasks.append(db_router.get_courses_student(master_slave_conn, shard_conn, cur_user.user_id, course, teacher, only_not_full, only_selected))
         campus.discard(current_campus)
     for c in campus:
-        tasks.append(remote_call(settings.get_campus_web_url(c) + '/api/private/v1/courses/student', params=params))
+        tasks.append(remote_call(settings.get_campus_web_url(c) + '/api-private/v1/courses/student', params=params))
     results = await asyncio.gather(*tasks)
     final_list = []
     for result in results:
@@ -126,7 +127,9 @@ async def get_courses_student(
 async def create_course(cur_user: AdminDep, master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, p: CourseCreateParams) -> CourseCreateResp:
     if p.campus == settings.current_campus():
         return await db_router.create_course(master_slave_conn, shard_conn, p)
-    code, resp = await remote_call(settings.get_campus_web_url(p.campus) + '/api/private/v1/courses', method='POST', json=p)
+    code, resp = await remote_call(settings.get_campus_web_url(p.campus) + '/api-private/v1/courses', method='POST', json=p)
+    if code is None:
+        return JSONResponse(status_code=502, content=GenericError(detail=err_bad_gateway))
     return JSONResponse(status_code=code, content=resp)
 
 
@@ -135,7 +138,9 @@ async def delete_course(cur_user: AdminDep, shard_conn: ShardConnDep, course_id:
     course_campus = get_course_campus(course_id)
     if course_campus == settings.current_campus():
         return await db_router.delete_course(shard_conn, course_id)
-    code, resp = await remote_call(settings.get_campus_web_url(course_campus) + f'/api/private/v1/courses/{course_id}', method='DELETE')
+    code, resp = await remote_call(settings.get_campus_web_url(course_campus) + f'/api-private/v1/courses/{course_id}', method='DELETE')
+    if code is None:
+        return JSONResponse(status_code=502, content=GenericError(detail=err_bad_gateway))
     return JSONResponse(status_code=code, content=resp)
 
 
@@ -144,5 +149,29 @@ async def update_course(cur_user: AdminDep, shard_conn: ShardConnDep, course_id:
     course_campus = get_course_campus(course_id)
     if course_campus == settings.current_campus():
         return await db_router.update_course(shard_conn, course_id, p)
-    code, resp = await remote_call(settings.get_campus_web_url(course_campus) + f'/api/private/v1/courses/{course_id}', method='PUT', json=p)
+    code, resp = await remote_call(settings.get_campus_web_url(course_campus) + f'/api-private/v1/courses/{course_id}', method='PUT', json=p)
+    if code is None:
+        return JSONResponse(status_code=502, content=GenericError(detail=err_bad_gateway))
+    return JSONResponse(status_code=code, content=resp)
+
+
+@router.post('/{course_id}/select}', status_code=204)
+async def select_course(cur_user: CurUserDep, master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, course_id: int, stu_id: int | None):
+    # stu_id参数为空，表示学生选课，id从cur_user获取
+    # stu_id非空，表示管理员帮学生选课，id从stu_id获取
+    if stu_id is None:
+        if cur_user.role != 'student':
+            raise HTTPException(status_code=403, detail=err_no_permission)
+        stu_id = cur_user.user_id
+    elif cur_user.role != 'admin':
+        raise HTTPException(status_code=403, detail=err_no_permission)
+    # 学生选课检查选课时段
+    if cur_user.role == 'student' and (await master_slave_conn.execute(text('SELECT 1 FROM selection_batch WHERE NOW() BETWEEN begin_time AND end_time'))).scalar() is None:
+        raise HTTPException(status_code=403, detail=err_selection_time)
+    course_campus = get_course_campus(course_id)
+    if course_campus == settings.current_campus():
+        return await db_router.select_course(master_slave_conn, shard_conn, stu_id, course_id)
+    code, resp = await remote_call(settings.get_campus_web_url(course_campus) + f'/api-private/v1/courses/{course_id}/select', method='POST', params={'stu_id': stu_id})
+    if code is None:
+        return JSONResponse(status_code=502, content=GenericError(detail=err_bad_gateway))
     return JSONResponse(status_code=code, content=resp)
