@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -24,20 +24,12 @@ class CourseResp(BaseModel):
     capacity: int
     num_selected: int
     campus: Literal['A', 'B', 'C']
-
-
-class CourseStudentResp(CourseResp):
-    is_selected: bool
+    is_selected: Optional[bool] = None
 
 
 class CourseQueryResp(BaseModel):
     total: int
     result: list[CourseResp]
-
-
-class CourseStudentQueryResp(BaseModel):
-    total: int
-    result: list[CourseStudentResp]
 
 
 class CourseSelectParams(BaseModel):

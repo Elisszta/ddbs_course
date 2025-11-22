@@ -5,12 +5,12 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.models.course_model import CourseCreateParams, CourseUpdateParams, CourseCreateResp, CourseStudentQueryResp, \
-    CourseStudentResp, CourseResp, CourseQueryResp
+from app.models.course_model import CourseCreateParams, CourseUpdateParams, CourseCreateResp, CourseResp, CourseQueryResp
 from app.models.generic_error import GenericError, err_course_cap_conflict, err_course_not_exist, \
-    err_course_id_conflict, err_course_id_full, err_teacher_not_exist, err_student_not_exist
+    err_course_id_conflict, err_course_id_full, err_teacher_not_exist, err_student_not_exist, err_no_permission
 from app.models.user_model import StudentQueryResp, StudentResp
 from app.utils.auth import verify_db_api
+from app.utils.classify_helper import get_user_role
 from app.utils.database import get_master_slave_connection, get_shard_connection, get_master_slave_connection_no_tx, \
     get_shard_connection_no_tx
 from app.utils.settings import settings
@@ -28,7 +28,7 @@ router = APIRouter(
     dependencies=(Depends(verify_db_api),)
 )
 
-
+# todo 把两个课程查询合并一下
 # 删用户，要把teach表或learn表相关条目删了，如果是learn表的，对应课程已选人数要减少
 @router.delete('/users/{user_id}', status_code=204)
 async def delete_user(shard_conn: ShardConnNoTxDep, user_id: int):
@@ -38,7 +38,10 @@ async def delete_user(shard_conn: ShardConnNoTxDep, user_id: int):
     :param user_id: 用户id
     :return:
     """
-    if user_id >= 1200000000:
+    role = get_user_role(user_id)
+    if role == 'admin':
+        raise HTTPException(status_code=403, detail=err_no_permission)
+    if role == 'teacher':
         # teacher
         async with shard_conn.begin():
             await shard_conn.execute(text('DELETE FROM teach WHERE tid = :tid'), {'tid': user_id})
@@ -60,7 +63,7 @@ async def delete_user(shard_conn: ShardConnNoTxDep, user_id: int):
 async def select_course(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, stu_id: int, course_id: int):
     """
     选课分库路由函数。若课程校区就在本地，可直接原地调用该函数
-    :param master_slave_conn: 本地主从库连接
+    :param master_slave_conn: +
     :param shard_conn: 本地分片库连接
     :param course_id: 课程id
     :param stu_id: 学生id
@@ -116,7 +119,14 @@ async def get_course_students(master_slave_conn: MasterSlaveConnNoTxDep, shard_c
     return StudentQueryResp(total=len(resp_result), result=resp_result)
 
 
-async def build_course_filter_sql(master_slave_conn: AsyncConnection, course: int | str | None, teacher: int | str | None, only_not_full: bool, stu_id: int | None = None, only_selected: bool = False) -> tuple[str | None, str | None, dict | None]:
+async def build_course_filter_sql(
+        master_slave_conn: AsyncConnection,
+        course: int | str | None,
+        teacher: int | str | None,
+        only_not_full: bool | None,
+        only_selected: bool | None,
+        stu_id: int | None
+) -> tuple[str, str, dict] | tuple[None, None, None]:
     params = {}
     join_part: list[str] = []
     where_part: list[str] = []
@@ -149,71 +159,30 @@ async def build_course_filter_sql(master_slave_conn: AsyncConnection, course: in
 
 
 @router.get('/courses')
-async def get_courses(
+async def query_courses(
         master_slave_conn: MasterSlaveConnNoTxDep,
         shard_conn: ShardConnDep,
         course: int | str | None = None,
         teacher: int | str | None = None,
-        only_not_full: bool = False
+        only_not_full: bool | None = None,
+        only_selected: bool | None = None,
+        stu_id: int | None = None,
 ) -> CourseQueryResp:
     """
-    教师管理员课程查询分库路由函数。若课程校区就在本地，可直接原地调用该函数
+    课程查询分库路由函数。若课程校区就在本地，可直接原地调用该函数
     :param master_slave_conn: 本地主从库连接，不自动事务
     :param shard_conn: 本地分片库连接
     :param course: 课程id或课程关键词或空
     :param teacher: 教师id或教师名或空
-    :param only_not_full: 是否只查询未满
+    :param only_not_full: 是否只查询未满或空
+    :param only_selected: 是否只查询已选或空。若为True，则必须提供学生id
+    :param stu_id: 学生id或空。若提供学生id，查询结果中将包括该学生是否已选的信息
     :return: 课程查询结果
     """
-    # 由于主从复制gtid临时表限制，这里的master_slave_conn必须手动控制事务
-    await master_slave_conn.execute(text('CREATE TEMPORARY TABLE tmp_tid (tid INT NOT NULL)'))  # 可以保证从分片库导过来的tid条数小于主从库的教师表条数，所以temp_tid是驱动表，所以就不建索引了
-    await shard_conn.execute(text('CREATE TEMPORARY TABLE tmp_tid_name (tid INT NOT NULL, name VARCHAR(255) NOT NULL)'))
-    # 使用半连接策略
-    # 啥条件都没限定的查询
-    if course is None and teacher is None and not only_not_full:
-        distinct_teacher_ids = (await shard_conn.execute(text('SELECT DISTINCT tid FROM teach'))).scalars().all()
-        table_name = 'teach'
-    else:
-        join_sql, where_sql, params = build_course_filter_sql(master_slave_conn, course, teacher, only_not_full)
-        if params is None:
-            return CourseQueryResp(total=0, result=[])
-        await shard_conn.execute(text('CREATE TEMPORARY TABLE tmp_cid_tid (cid INT NOT NULL, tid INT NOT NULL, INDEX idx_tid (tid))'))
-        await shard_conn.execute(text(f'INSERT INTO tmp_cid_tid SELECT tmp.id, t.tid FROM (course c {join_sql} WHERE {where_sql}) tmp JOIN teach t ON tmp.id = t.cid'), params)
-        distinct_teacher_ids = (await shard_conn.execute(text('SELECT DISTINCT tid FROM tmp_cid_tid'))).scalars().all()
-        table_name = 'tmp_cid_tid'
-    await master_slave_conn.execute(text('INSERT INTO tmp_tid(tid) VALUES (:tid)'), [{'tid': teacher_id} for teacher_id in distinct_teacher_ids])
-    result = await master_slave_conn.execute(text('SELECT t.id, t.name FROM tmp_tid tmp JOIN teacher t ON t.id = tmp.tid'))
-    await shard_conn.execute(text('INSERT INTO tmp_tid_name (tid, name) VALUES (:tid, :name)'), [{'tid': row[0], 'name': row[1]} for row in result.all()])
-    result = await shard_conn.execute(text("SELECT c.id, GROUP_CONCAT(tmp.name, ', ') AS teachers, c.name, c.capacity, c.num_selected, c.campus FROM course c "
-                                           f'JOIN {table_name} t ON c.id = t.cid '
-                                           'JOIN tmp_tid_name tmp ON t.tid = tmp.tid '
-                                           'GROUP BY c.id'))
-    resp_result = [CourseResp(course_id=row[0], teachers=row[1], name=row[2], capacity=row[3], num_selected=row[4], campus=row[5]) for row in result.all()]
-    return CourseQueryResp(total=len(resp_result), result=resp_result)
-
-
-@router.get('/courses/student')
-async def get_courses_student(
-        master_slave_conn: MasterSlaveConnNoTxDep,
-        shard_conn: ShardConnDep,
-        stu_id: int,
-        course: int | str | None = None,
-        teacher: int | str | None = None,
-        only_not_full: bool = False,
-        only_selected: bool = False,
-) -> CourseStudentQueryResp:
-    """
-    学生课程查询分库路由函数。若课程校区就在本地，可直接原地调用该函数
-    :param master_slave_conn: 本地主从库连接，不自动事务
-    :param shard_conn: 本地分片库连接
-    :param stu_id: 学生id
-    :param course: 课程id或课程关键词或空
-    :param teacher: 教师id或教师名或空
-    :param only_not_full: 是否只查询未满
-    :param only_selected: 是否只查询已选
-    :return: 课程查询结果
-    """
-    # 由于主从复制gtid临时表限制，这里的master_slave_conn必须手动控制事务
+    # 大量利用if None不执行的特性
+    if only_selected and stu_id is None:
+        raise HTTPException(status_code=422, detail='stu_id is required when only_selected')
+    # 由于主从复制gtid的临时表限制，这里的master_slave_conn不能用事务
     await master_slave_conn.execute(text('CREATE TEMPORARY TABLE tmp_tid (tid INT NOT NULL)'))  # 可以保证从分片库导过来的tid条数小于主从库的教师表条数，所以temp_tid是驱动表，所以就不建索引了
     await shard_conn.execute(text('CREATE TEMPORARY TABLE tmp_tid_name (tid INT NOT NULL, name VARCHAR(255) NOT NULL)'))
     # 使用半连接策略
@@ -222,9 +191,9 @@ async def get_courses_student(
         distinct_teachers_id = (await shard_conn.execute(text('SELECT DISTINCT tid FROM teach'))).scalars().all()
         table_name = 'teach'
     else:
-        join_sql, where_sql, params = build_course_filter_sql(master_slave_conn, course, teacher, only_not_full, stu_id, only_selected)
-        if params is None:
-            return CourseStudentQueryResp(total=0, result=[])
+        join_sql, where_sql, params = build_course_filter_sql(master_slave_conn, course, teacher, only_not_full, only_selected, stu_id)
+        if join_sql is None:
+            return CourseQueryResp(total=0, result=[])
         await shard_conn.execute(text('CREATE TEMPORARY TABLE tmp_cid_tid (cid INT NOT NULL, tid INT NOT NULL, INDEX idx_tid (tid))'))
         await shard_conn.execute(text(f'INSERT INTO tmp_cid_tid SELECT tmp.id, t.tid FROM (course c {join_sql} WHERE {where_sql}) tmp JOIN teach t ON tmp.id = t.cid'), params)
         distinct_teachers_id = (await shard_conn.execute(text('SELECT DISTINCT tid FROM tmp_cid_tid'))).scalars().all()
@@ -232,16 +201,23 @@ async def get_courses_student(
     await master_slave_conn.execute(text('INSERT INTO tmp_tid(tid) VALUES (:tid)'), [{'tid': teacher_id} for teacher_id in distinct_teachers_id])
     result = await master_slave_conn.execute(text('SELECT t.id, t.name FROM tmp_tid tmp JOIN teacher t ON t.id = tmp.tid'))
     await shard_conn.execute(text('INSERT INTO tmp_tid_name (tid, name) VALUES (:tid, :name)'), [{'tid': row[0], 'name': row[1]} for row in result.all()])
-    result = await shard_conn.execute(text("SELECT c.id, GROUP_CONCAT(tmp.name, ', ') AS teachers, c.name, c.capacity, c.num_selected, c.campus, CASE "
-                                               'WHEN l.sid IS NULL THEN false '
-                                               'ELSE true AS is_selected '
-                                           'FROM course c '
-                                           f'JOIN {table_name} t ON c.id = t.cid '
-                                           'JOIN tmp_tid_name tmp ON t.tid = tmp.tid '
-                                           "LEFT JOIN learn l ON l.sid = :sid AND tmp1.id = l.cid "
-                                           'GROUP BY c.id'), {'sid': stu_id})
-    resp_result = [CourseStudentResp(course_id=row[0], teachers=row[1], name=row[2], capacity=row[3], num_selected=row[4], campus=row[5], is_selected=row[6]) for row in result.all()]
-    return CourseStudentQueryResp(total=len(resp_result), result=resp_result)
+    if stu_id is None:
+        result = await shard_conn.execute(text("SELECT c.id, GROUP_CONCAT(tmp.name, ', ') AS teachers, c.name, c.capacity, c.num_selected, c.campus FROM course c "
+                                               f'JOIN {table_name} t ON c.id = t.cid '
+                                               'JOIN tmp_tid_name tmp ON t.tid = tmp.tid '
+                                               'GROUP BY c.id'))
+        resp_result = [CourseResp(course_id=row[0], teachers=row[1], name=row[2], capacity=row[3], num_selected=row[4], campus=row[5]) for row in result.all()]
+    else:
+        result = await shard_conn.execute(text("SELECT c.id, GROUP_CONCAT(tmp.name, ', ') AS teachers, c.name, c.capacity, c.num_selected, c.campus, CASE "
+                                                   'WHEN l.sid IS NULL THEN false '
+                                                   'ELSE true AS is_selected '
+                                               'FROM course c '
+                                               f'JOIN {table_name} t ON c.id = t.cid '
+                                               'JOIN tmp_tid_name tmp ON t.tid = tmp.tid '
+                                               "LEFT JOIN learn l ON l.sid = :sid AND tmp1.id = l.cid "
+                                               'GROUP BY c.id'), {'sid': stu_id})
+        resp_result = [CourseResp(course_id=row[0], teachers=row[1], name=row[2], capacity=row[3], num_selected=row[4], campus=row[5], is_selected=row[6]) for row in result.all()]
+    return CourseQueryResp(total=len(resp_result), result=resp_result)
     # await shard_conn.execute(text(
     #     'INSERT INTO temp_result '
     #     'SELECT tmp.id, t.tid FROM ('

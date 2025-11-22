@@ -6,8 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 from starlette.responses import JSONResponse
 
-from app.models.course_model import CourseQueryResp, CourseStudentQueryResp, CourseCreateParams, CourseCreateResp, \
-    CourseUpdateParams
+from app.models.course_model import CourseQueryResp, CourseCreateParams, CourseCreateResp, CourseUpdateParams
 from app.models.generic_error import GenericError, err_no_permission, err_selection_time, err_bad_gateway
 from app.models.user_model import CurUser
 from app.routers import db_router
@@ -37,16 +36,22 @@ router = APIRouter(
 
 
 @router.get('/')
-async def get_courses(
+async def query_courses(
         cur_user: CurUserDep,
         master_slave_conn: MasterSlaveConnNoTxDep,
         shard_conn: ShardConnDep,
         campus: set[Literal['A', 'B', 'C']] = Query(min_length=1),
         course: int | str | None = None,
         teacher: int | str | None = None,
-        only_not_full: bool = False
+        only_not_full: bool | None = None,
+        only_selected: bool | None = None,
 ) -> CourseQueryResp:
-    params = {'campus': campus, 'course': course, 'teacher': teacher, 'only_not_full': only_not_full}
+    if cur_user.role == 'student':
+        params = {'course': course, 'teacher': teacher, 'only_not_full': only_not_full, 'only_selected': only_selected, 'stu_id': cur_user.user_id}
+        local_task = db_router.get_courses(master_slave_conn, shard_conn, course, teacher, only_not_full, only_selected, cur_user.user_id)
+    else:
+        params = {'course': course, 'teacher': teacher, 'only_not_full': only_not_full}
+        local_task = db_router.get_courses(master_slave_conn, shard_conn, course, teacher, only_not_full)
     current_campus = settings.current_campus()
     if type(course) is int:
         # 特判课程id查询，因为课程id可以直接得出位于哪个分库
@@ -54,7 +59,7 @@ async def get_courses(
         if course_campus not in campus:
             return CourseQueryResp(total=0, result=[])
         if course_campus == current_campus:
-            return await db_router.get_courses(master_slave_conn, shard_conn, course, teacher, only_not_full)   # 本地
+            return await local_task # 本地
         # 远程
         code, resp = await remote_call(settings.get_campus_web_url(course_campus) + '/api-private/v1/courses', params=params)
         if code is not None and 200 <= code < 300:
@@ -63,13 +68,12 @@ async def get_courses(
     # 其他情况视情况分配到远程或本地
     tasks = []
     if current_campus in campus:
-        tasks.append(db_router.get_courses(master_slave_conn, shard_conn, course, teacher, only_not_full))
+        tasks.append(local_task)
         campus.discard(current_campus)
     for c in campus:
         tasks.append(remote_call(settings.get_campus_web_url(c) + '/api-private/v1/courses', params=params))
-    results = await asyncio.gather(*tasks)
     final_list = []
-    for result in results:
+    for result in await asyncio.gather(*tasks):
         if type(result) is CourseQueryResp:
             final_list.extend(result.result)
         else:
@@ -77,50 +81,6 @@ async def get_courses(
             if code is not None and 200 <= code < 300:
                 final_list.extend(resp.result)
     return CourseQueryResp(total=len(final_list), result=final_list)
-
-
-@router.get('/student')
-async def get_courses_student(
-        cur_user: StudentDep,
-        master_slave_conn: MasterSlaveConnNoTxDep,
-        shard_conn: ShardConnDep,
-        campus: set[Literal['A', 'B', 'C']] = Query(min_length=1),
-        course: int | str | None = None,
-        teacher: int | str | None = None,
-        only_not_full: bool = False,
-        only_selected: bool = False,
-) -> CourseStudentQueryResp:
-    params = {'stu_id': cur_user.user_id, 'campus': campus, 'course': course, 'teacher': teacher, 'only_not_full': only_not_full, 'only_selected': only_selected}
-    current_campus = settings.current_campus()
-    if type(course) is int:
-        # 特判课程id查询，因为课程id可以直接得出位于哪个分库
-        course_campus = get_course_campus(course)
-        if course_campus not in campus:
-            return CourseStudentQueryResp(total=0, result=[])
-        if course_campus == current_campus:
-            return await db_router.get_courses_student(master_slave_conn, shard_conn, cur_user.user_id, course, teacher, only_not_full, only_selected)   # 本地
-        # 远程
-        code, resp = await remote_call(settings.get_campus_web_url(course_campus) + '/api-private/v1/courses/student', params=params)
-        if code is not None and 200 <= code < 300:
-            return resp
-        return CourseStudentQueryResp(total=0, result=[])
-    # 其他情况视情况分配到远程或本地
-    tasks = []
-    if current_campus in campus:
-        tasks.append(db_router.get_courses_student(master_slave_conn, shard_conn, cur_user.user_id, course, teacher, only_not_full, only_selected))
-        campus.discard(current_campus)
-    for c in campus:
-        tasks.append(remote_call(settings.get_campus_web_url(c) + '/api-private/v1/courses/student', params=params))
-    results = await asyncio.gather(*tasks)
-    final_list = []
-    for result in results:
-        if type(result) is CourseQueryResp:
-            final_list.extend(result.result)
-        else:
-            code, resp = result
-            if code is not None and 200 <= code < 300:
-                final_list.extend(resp.result)
-    return CourseStudentQueryResp(total=len(final_list), result=final_list)
 
 
 @router.post('/', status_code=201)
