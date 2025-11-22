@@ -20,10 +20,9 @@ async def remote_call(
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.request(method, url, headers=final_headers, params=params, json=json) as resp:
                 try:
-                    json_data = await resp.json()
+                    return resp.status, await resp.json()
                 except Exception:
-                    json_data = None
-                return resp.status, json_data
+                    return resp.status, None
     except Exception as e:
-        print(e)
+        print(f'Remote error: {e}')
         return None, str(e)

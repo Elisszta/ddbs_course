@@ -23,12 +23,12 @@ ShardConnDep = Annotated[AsyncConnection, Depends(get_shard_connection)]
 
 router = APIRouter(
     prefix='/api-private/v1',
-    tags=['DB Cross Site API'],
+    tags=['DB Cross Site Private API'],
     responses={403: {'model': GenericError, 'description': 'Insufficient permission'}},
     dependencies=(Depends(verify_db_api),)
 )
 
-# todo 把两个课程查询合并一下
+# TODO 主从复制库上禁止使用临时表
 # 删用户，要把teach表或learn表相关条目删了，如果是learn表的，对应课程已选人数要减少
 @router.delete('/users/{user_id}', status_code=204)
 async def delete_user(shard_conn: ShardConnNoTxDep, user_id: int):
@@ -60,7 +60,7 @@ async def delete_user(shard_conn: ShardConnNoTxDep, user_id: int):
 
 
 @router.post('/courses/{course_id}/select', status_code=204)
-async def select_course(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, stu_id: int, course_id: int):
+async def select_course(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, course_id: int, stu_id: int):
     """
     选课分库路由函数。若课程校区就在本地，可直接原地调用该函数
     :param master_slave_conn: +
@@ -71,7 +71,7 @@ async def select_course(master_slave_conn: MasterSlaveConnDep, shard_conn: Shard
     """
     if (await master_slave_conn.execute(text('SELECT 1 FROM student WHERE id = :id'), {'id': stu_id})).scalar() is None:
         raise HTTPException(status_code=404, detail=err_student_not_exist)  # 学生不存在
-    row = (await shard_conn.execute(text('SELECT num_selected, capacity FROM course WHERE id = :id FOR UPDATE'), {'id': course_id})).one_or_none()  # 表锁
+    row = (await shard_conn.execute(text('SELECT num_selected, capacity FROM course WHERE id = :id FOR UPDATE'), {'id': course_id})).one_or_none()  # 行锁
     if row is None:
         raise HTTPException(status_code=404, detail=err_course_not_exist)   # 课程不存在
     if row[0] >= row[1]:
@@ -81,7 +81,7 @@ async def select_course(master_slave_conn: MasterSlaveConnDep, shard_conn: Shard
 
 
 @router.post('/courses/{course_id}/deselect', status_code=204)
-async def deselect_course(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, stu_id: int, course_id: int):
+async def deselect_course(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, course_id: int, stu_id: int):
     """
     退课分库路由函数。若课程校区就在本地，可直接原地调用该函数
     :param master_slave_conn: 本地主从库连接
@@ -92,7 +92,7 @@ async def deselect_course(master_slave_conn: MasterSlaveConnDep, shard_conn: Sha
     """
     if (await master_slave_conn.execute(text('SELECT 1 FROM student WHERE id = :id'), {'id': stu_id})).scalar() is None:
         raise HTTPException(status_code=404, detail=err_student_not_exist)  # 学生不存在
-    num_selected = (await shard_conn.execute(text('SELECT num_selected FROM course WHERE id = :id FOR UPDATE'), {'id': course_id})).scalar() # 表锁
+    num_selected = (await shard_conn.execute(text('SELECT num_selected FROM course WHERE id = :id FOR UPDATE'), {'id': course_id})).scalar() # 行锁
     if num_selected is None:
         raise HTTPException(status_code=404, detail=err_course_not_exist)  # 课程不存在
     await shard_conn.execute(text('UPDATE course SET num_selected = :num WHERE id = :id'), {'num': num_selected - 1, 'id': course_id})
@@ -110,7 +110,7 @@ async def get_course_students(master_slave_conn: MasterSlaveConnNoTxDep, shard_c
     """
     if (await shard_conn.execute(text('SELECT 1 FROM course WHERE id = :id'), {'id': course_id})).scalar() is None:
         raise HTTPException(status_code=404, detail=err_course_not_exist)
-    # 直接把学生id发过去连接
+    # 直接把学生id发过去连接查询
     await master_slave_conn.execute(text('CREATE TEMPORARY TABLE tmp_sid (sid INT NOT NULL)'))  # tmp_sid是驱动表，所以就不建索引了
     student_ids = (await shard_conn.execute(text('SELECT DISTINCT sid FROM learn WHERE cid = :cid'), {'cid': course_id})).scalars().all()
     await master_slave_conn.execute(text('INSERT INTO tmp_sid(sid) VALUES (:sid)'), [{'sid': student_id} for student_id in student_ids])
@@ -181,7 +181,7 @@ async def query_courses(
     """
     # 大量利用if None不执行的特性
     if only_selected and stu_id is None:
-        raise HTTPException(status_code=422, detail='stu_id is required when only_selected')
+        raise HTTPException(status_code=422, detail='"stu_id" is required when "only_selected" is True')
     # 由于主从复制gtid的临时表限制，这里的master_slave_conn不能用事务
     await master_slave_conn.execute(text('CREATE TEMPORARY TABLE tmp_tid (tid INT NOT NULL)'))  # 可以保证从分片库导过来的tid条数小于主从库的教师表条数，所以temp_tid是驱动表，所以就不建索引了
     await shard_conn.execute(text('CREATE TEMPORARY TABLE tmp_tid_name (tid INT NOT NULL, name VARCHAR(255) NOT NULL)'))
@@ -260,9 +260,10 @@ async def create_course(master_slave_conn: MasterSlaveConnDep, shard_conn: Shard
     :param p: 课程创建参数
     :return:
     """
-    # 检查教师是否存在
-    if (await master_slave_conn.execute(text('SELECT COUNT(*) FROM teacher WHERE id IN :ids'), {'ids': p.teacher_ids})).scalar() != len(p.teacher_ids):
-        raise HTTPException(status_code=404, detail=err_teacher_not_exist)
+    # 检查教师是否存在，顺便锁定行防止教师被删
+    for teacher_id in p.teacher_ids:
+        if (await master_slave_conn.execute(text('SELECT id FROM teacher WHERE id = :id LOCK IN SHARE MODE'), {'id': teacher_id})).scalar() is None:
+            raise HTTPException(status_code=404, detail=err_teacher_not_exist)
     # 生成id
     # 无锁，如果真的有并发插入导致id重了，那就返回409让用户重试呗
     new_id = await gen_course_id(shard_conn)
@@ -296,14 +297,19 @@ async def delete_course(shard_conn: ShardConnDep, course_id: int):
 
 
 @router.put('/courses/{course_id}', status_code=204)
-async def update_course(shard_conn: ShardConnDep, course_id: int, p: CourseUpdateParams):
+async def update_course(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, course_id: int, p: CourseUpdateParams):
     """
     课程更新分库路由函数。若课程校区就在本地，可直接原地调用该函数
+    :param master_slave_conn: 本地主从库连接
     :param shard_conn: 本地分片库连接
     :param course_id: 课程id
     :param p: 课程更新参数
     :return:
     """
+    # 检查教师是否存在，顺便锁定行防止教师被删
+    for teacher_id in p.teacher_ids:
+        if (await master_slave_conn.execute(text('SELECT id FROM teacher WHERE id = :id LOCK IN SHARE MODE'), {'id': teacher_id})).scalar() is None:
+            raise HTTPException(status_code=404, detail=err_teacher_not_exist)
     num_selected = (await shard_conn.execute(text('SELECT num_selected FROM course WHERE id = :cid FOR UPDATE'), {'cid': course_id})).scalar()  # 行级锁启动
     if num_selected is None:
         raise HTTPException(status_code=404, detail=err_course_not_exist)
