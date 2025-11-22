@@ -13,15 +13,12 @@ from app.models.user_model import CurUser, StudentQueryResp
 from app.routers import db_router
 from app.utils.auth import get_current_user, get_current_admin, get_current_admin_or_teacher, get_current_student
 from app.utils.classify_helper import get_course_campus
-from app.utils.database import get_master_slave_connection_no_tx, get_master_slave_connection, \
-    get_shard_connection_no_tx, get_shard_connection
+from app.utils.database import get_master_slave_connection, get_shard_connection
 from app.utils.remote_call import remote_call
 from app.utils.settings import settings
 
 
-MasterSlaveConnNoTxDep = Annotated[AsyncConnection, Depends(get_master_slave_connection_no_tx)]
 MasterSlaveConnDep = Annotated[AsyncConnection, Depends(get_master_slave_connection)]
-ShardConnNoTxDep = Annotated[AsyncConnection, Depends(get_shard_connection_no_tx)]
 ShardConnDep = Annotated[AsyncConnection, Depends(get_shard_connection)]
 UserDep = Annotated[CurUser, Depends(get_current_user)]
 AdminDep = Annotated[CurUser, Depends(get_current_admin)]
@@ -39,7 +36,7 @@ router = APIRouter(
 @router.get('/')
 async def query_courses(
         cur_user: UserDep,
-        master_slave_conn: MasterSlaveConnNoTxDep,
+        master_slave_conn: MasterSlaveConnDep,
         shard_conn: ShardConnDep,
         campus: set[Literal['A', 'B', 'C']] = Query(min_length=1),
         course: int | str | None = None,
@@ -128,7 +125,7 @@ async def update_course(cur_user: AdminDep, master_slave_conn: MasterSlaveConnDe
     404: {'model': GenericError, 'description': 'Course does not exist'},
     502: {'model': GenericError, 'description': 'Remote not responding'}
 })
-async def get_course_students(cur_user: AdminTeacherDep, master_slave_conn: MasterSlaveConnNoTxDep, shard_conn: ShardConnDep, course_id: int) -> StudentQueryResp:
+async def get_course_students(cur_user: AdminTeacherDep, master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, course_id: int) -> StudentQueryResp:
     course_campus = get_course_campus(course_id)
     if course_campus == settings.current_campus():
         return await db_router.get_course_students(master_slave_conn, shard_conn, course_id)
@@ -169,7 +166,7 @@ async def select_or_deselect_course(
 
 @router.post('/{course_id}/select', status_code=204, responses={
     404: {'model': GenericError, 'description': 'Course or student does not exist'},
-    409: {'model': GenericError, 'description': 'Course capacity conflict'},
+    409: {'model': GenericError, 'description': 'Course capacity conflict or already selected'},
     502: {'model': GenericError, 'description': 'Remote not responding'}
 })
 async def select_course(cur_user: UserDep, master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, course_id: int, stu_id: int | None = None):
