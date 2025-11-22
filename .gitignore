@@ -8,5 +8,11 @@ __pycache__/
 .idea/
 *.DS_Store
 
-# Docker Volume
+# Docker Volume - MySQL data files
+data/
 mysql_data/
+
+# Environment variables (may contain sensitive info)
+.env
+.env.local
+.env.*.local
