@@ -57,6 +57,9 @@ async def get_current_admin(cur_user: UserDep) -> CurUser:
     return cur_user
 
 
+AdminDep = Annotated[CurUser, Depends(get_current_admin)]
+
+
 async def get_current_admin_or_teacher(cur_user: UserDep) -> CurUser:
     """
     路由函数依赖，确保当前接口只有管理员或教师才能访问
@@ -68,6 +71,9 @@ async def get_current_admin_or_teacher(cur_user: UserDep) -> CurUser:
     return cur_user
 
 
+AdminTeacherDep = Annotated[CurUser, Depends(get_current_admin_or_teacher)]
+
+
 async def get_current_student(cur_user: UserDep) -> CurUser:
     """
     路由函数依赖，确保当前接口只有管理员或教师才能访问
@@ -77,3 +83,6 @@ async def get_current_student(cur_user: UserDep) -> CurUser:
     if cur_user.role != 'student':
         raise HTTPException(status_code=403, detail=err_no_permission)
     return cur_user
+
+
+StudentDep = Annotated[CurUser, Depends(get_current_student)]

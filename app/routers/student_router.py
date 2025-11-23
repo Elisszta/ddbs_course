@@ -1,157 +1,248 @@
-from fastapi import APIRouter, HTTPException, Query
-from app.routers.course_router import StudentDep
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
+
+from app.models.course_model import CourseQueryResp
+from app.models.generic_error import err_course_id_invalid, err_user_exist
+from app.models.user_model import StudentCreateParams
+from app.routers.dbprivate import shard_router  # 导入私有路由模块以便本地直接调用
 from app.settings import settings
-# 引入你的数据库连接池或执行函数，例如:
-# from app.db import execute_master, execute_shard_a, execute_shard_b, execute_shard_c
+from app.utils.auth import StudentDep, AdminDep
+from app.utils.database import get_master_slave_connection, get_shard_connection
+from app.utils.remote_call import remote_db_call
+
+# 定义数据库连接依赖，用于本地直接调用私有函数
+MasterSlaveConnDep = Annotated[AsyncConnection, Depends(get_master_slave_connection)]
+ShardConnDep = Annotated[AsyncConnection, Depends(get_shard_connection)]
 
 router = APIRouter(prefix="/student", tags=["Student"])
 
-def get_shard_by_campus(campus: str):
-    """辅助函数：根据校区获取对应的数据库连接/URL"""
-    # 实际项目中这里应该返回对应的数据库连接对象
-    if campus == 'A': return "DB_SHARD_A"
-    if campus == 'B': return "DB_SHARD_B"
-    return "DB_SHARD_C"
-
-def get_shard_by_course_id(course_id: int):
-    """辅助函数：根据课程ID前缀判断在哪个分库"""
-    # 假设 ID 格式：10xxxxx -> A, 11xxxxx -> B, 12xxxxx -> C
-    prefix = str(course_id)[:2]
-    if prefix == '10': return "DB_SHARD_A"
-    if prefix == '11': return "DB_SHARD_B"
-    if prefix == '12': return "DB_SHARD_C"
-    raise HTTPException(status_code=400, detail="无效的课程ID")
-
 # =======================
-# 1. 查询选课批次
+# 1. 管理员添加学生 (Master写)
 # =======================
-@router.get("/batches")
-async def get_batches(user: StudentDep):
-    """
-    学生查询抢课时间段
-    读取：主从库 (Master/Slave)
-    """
-    sql = "SELECT * FROM selection_batch WHERE end_time > NOW()"
-    # TODO: result = await execute_master(sql)
-    result = [{"id": 1, "name": "第一轮选课", "status": "open"}] # 模拟数据
-    return {"code": 0, "data": result}
-
-# =======================
-# 2. 查询全校课程
-# =======================
-@router.get("/courses")
-async def list_courses(
-    user: StudentDep, 
-    campus: str = Query("A", description="校区: A/B/C"),
-    keyword: str | None = None,
-    only_not_full: bool = False
+@router.post("/add", status_code=201)
+async def add_student(
+    conn: MasterSlaveConnDep, 
+    student: StudentCreateParams, 
+    user: AdminDep
 ):
     """
-    查询指定校区的课程
-    读取：指定的分片库 (Shard)
+    管理员添加学生接口。
+    
+    根据当前节点是否为主库(Master)，决定是本地写入还是转发请求。
+    
+    :param conn: 主从库连接对象 (MasterSlaveConnDep)。
+                 如果是主库，用于直接执行 INSERT SQL。
+    :param student: 学生创建参数 (StudentCreateParams)。
+                 包含 id, name, sex, age, current_campus。
+    :param user: 当前管理员用户 (AdminDep)。
+                 鉴权依赖，保证只有管理员角色可调用此接口。
+    :return: 成功消息 {"msg": "Student created"}。
     """
-    # 1. 确定去哪个库查
-    target_db = get_shard_by_campus(campus)
-    
-    # 2. 构建 SQL
-    sql = "SELECT * FROM course WHERE 1=1"
-    params = {}
-    if keyword:
-        sql += " AND name LIKE :keyword"
-        params['keyword'] = f"%{keyword}%"
-    if only_not_full:
-        sql += " AND num_selected < capacity"
+    if settings.is_master():
+        # 本地直接写入 (Master)
+        try:
+            # 适配 init.sql: 包含 sex, age, current_campus
+            await conn.execute(
+                text('INSERT INTO student (id, name, sex, age, current_campus) VALUES (:id, :name, :sex, :age, :current_campus)'),
+                student.model_dump()
+            )
+
+            # db_id = (await conn.execute(text("SELECT @@server_id"))).scalar()
+            # print(f"\n实际上写入的数据库 Server ID 是: {db_id}\n")
+            
+        except Exception:
+            # 实际生产中应区分 IntegrityError
+            raise HTTPException(status_code=409, detail=err_user_exist)
+    else:
+        # 远程转发给 Master
+        master_url = settings.campus_a_web_url
+        if not master_url:
+            raise HTTPException(status_code=500, detail="Master URL not configured")
         
-    # TODO: courses = await execute_shard(target_db, sql, params)
-    
-    # 模拟数据
-    courses = [
-        {"id": 100001, "name": "分布式数据库", "capacity": 100, "num_selected": 50, "campus": "A"}
-    ]
-    
-    # 3. (可选优化) 如果要显示“我是否已选”，需要再去查 learn 表
-    # 这里为了性能通常交给前端去匹配，或者再发一次查询
-    
-    return {"code": 0, "data": courses}
+        target_url = f"{master_url.rstrip('/')}/api-private/v1/students"
+        status, result = await remote_db_call(url=target_url, method="POST", json=student.model_dump())
+        
+        if status != 201:
+            detail = result.get('detail') if isinstance(result, dict) else str(result)
+            raise HTTPException(status_code=status or 500, detail=detail)
+            
+    return {"msg": "Student created"}
 
 # =======================
-# 3. 查询我已选的课
+# 2. 查询全校课程 (Shard读)
 # =======================
-@router.get("/my-courses")
-async def get_my_courses(user: StudentDep):
+@router.get("/courses", response_model=CourseQueryResp)
+async def list_courses(
+    user: StudentDep,
+    ms_conn: MasterSlaveConnDep,
+    shard_conn: ShardConnDep,
+    campus: str = Query("A", description="校区: A/B/C"),
+    keyword: str | None = None,
+    only_not_full: bool = False,
+    only_selected: bool = False
+):
     """
-    查询我选的所有课
-    读取：遍历所有分片库 (Shard A + B + C)
+    查询全校课程接口。
+    
+    支持按校区、关键词、容量、是否已选进行筛选。
+    逻辑：判断目标 campus 参数所指的校区地址。
+    - 如果是当前校区：直接调用 shard_router.query_courses 进行本地查询。
+    - 如果是其他校区：远程调用对应校区的私有接口。
+    
+    :param user: 当前登录学生 (StudentDep)。
+                 用于在开启 only_selected=True 时查询该学生是否已选。
+    :param ms_conn: 主从库连接。
+                 本地调用时传递给 shard_router，用于关联查询教师名称等主库信息。
+    :param shard_conn: 分片库连接。
+                 本地调用时传递给 shard_router，用于查询课程表。
+    :param campus: 目标校区 (A/B/C)。
+                 核心路由参数，决定了连接本地数据库还是进行远程转发。
+    :param keyword: 课程名称关键词过滤。
+    :param only_not_full: 是否只显示未满员的课程 (capacity > num_selected)。
+    :param only_selected: 是否只显示当前学生已选的课程。
+    :return: 课程列表数据 (CourseQueryResp)。
     """
-    my_courses = []
+    target_url = settings.get_campus_web_url(campus)
     
-    # 因为学生可以在任意校区选课，必须遍历所有分库
-    shards = ["DB_SHARD_A", "DB_SHARD_B", "DB_SHARD_C"]
+    # === 本地调用 ===
+    if target_url is None:
+        # 直接调用 shard_router 中的函数，传入本地连接
+        return await shard_router.query_courses(
+            master_slave_conn=ms_conn,
+            shard_conn=shard_conn,
+            course=keyword,
+            teacher=None,
+            only_not_full=only_not_full,
+            only_selected=only_selected,
+            stu_id=user.user_id
+        )
     
-    sql = """
-        SELECT c.id, c.name, c.campus, c.capacity, l.select_time 
-        FROM learn l
-        JOIN course c ON l.cid = c.id
-        WHERE l.sid = :uid
-    """
-    
-    for shard in shards:
-        # TODO: rows = await execute_shard(shard, sql, {"uid": user.user_id})
-        rows = [] # 模拟结果
-        my_courses.extend(rows)
+    # === 远程调用 ===
+    else:
+        full_url = f"{target_url.rstrip('/')}/api-private/v1/courses"
+        # 构造参数
+        params = {
+            "only_not_full": str(only_not_full).lower(),
+            "only_selected": str(only_selected).lower()
+        }
+        if keyword: params["course"] = keyword
+        # 如果只看已选，必须传 stu_id 给远程
+        if only_selected: params["stu_id"] = user.user_id 
         
-    return {"code": 0, "data": my_courses}
+        status, result = await remote_db_call(url=full_url, params=params)
+        
+        if status != 200:
+             detail = result.get('detail') if isinstance(result, dict) else str(result)
+             raise HTTPException(status_code=status or 500, detail=detail)
+        return result
 
 # =======================
-# 4. 抢课 (核心逻辑)
+# 3. 抢课 (Shard写)
 # =======================
-@router.post("/courses/{course_id}/select")
-async def select_course(course_id: int, user: StudentDep):
+@router.post("/courses/{course_id}/select", status_code=204)
+async def select_course(
+    course_id: int, 
+    user: StudentDep,
+    ms_conn: MasterSlaveConnDep,
+    shard_conn: ShardConnDep
+):
     """
-    抢课接口
-    写入：指定分片库 (开启事务)
+    学生抢课接口。
+    
+    逻辑：根据 course_id 的前缀判断课程所属校区。
+    - 本地校区：直接调用 shard_router.select_course，执行悲观锁+事务写入。
+    - 远程校区：转发 HTTP POST 请求到对应分校区的私有接口。
+    
+    :param course_id: 课程ID (例如 100001)。
+                      前两位(10/11/12)标识了课程所在的校区(A/B/C)。
+    :param user: 当前操作学生 (StudentDep)。
+    :param ms_conn: 主从库连接。本地调用时用于校验学生是否存在。
+    :param shard_conn: 分片库连接。本地调用时用于执行选课事务。
+    :return: 204 No Content (成功)。
     """
-    # 1. 判断去哪个库
-    target_db = get_shard_by_course_id(course_id)
+    # 1. 解析课程ID确定校区
+    course_prefix = str(course_id)[:2]
+    campus_map = {'10': 'A', '11': 'B', '12': 'C'}
+    if course_prefix not in campus_map:
+        raise HTTPException(status_code=400, detail=err_course_id_invalid)
     
-    # 2. (可选) 检查当前是否在选课时间内 (读主库 check selection_batch)
-    
-    # 3. 开启分库事务
-    # async with target_db.transaction():
-    try:
-        # A. 悲观锁查询课程余量
-        # SELECT capacity, num_selected FROM course WHERE id = :cid FOR UPDATE
+    target_campus = campus_map[course_prefix]
+    target_url = settings.get_campus_web_url(target_campus)
+
+    # === 本地调用 ===
+    if target_url is None:
+        # 注意：shard_router 必须处理 select_time 字段的写入 (例如使用 NOW())
+        await shard_router.select_course(
+            master_slave_conn=ms_conn,
+            shard_conn=shard_conn,
+            course_id=course_id,
+            stu_id=user.user_id
+        )
+        return
+
+    # === 远程调用 ===
+    else:
+        full_url = f"{target_url.rstrip('/')}/api-private/v1/courses/{course_id}/select"
+        # query param 传 stu_id
+        status, result = await remote_db_call(
+            url=full_url, 
+            method="POST", 
+            params={"stu_id": user.user_id}
+        )
         
-        # B. 判断是否已满
-        # if num_selected >= capacity: raise Error("课程已满")
-        
-        # C. 写入 learn 表
-        # INSERT INTO learn (sid, cid, select_time) VALUES (:uid, :cid, NOW())
-        
-        # D. 更新课程表
-        # UPDATE course SET num_selected = num_selected + 1 WHERE id = :cid
-        
-        # E. 提交事务
-        pass
-    except Exception as e:
-        # 回滚
-        raise HTTPException(status_code=400, detail="抢课失败: " + str(e))
-        
-    return {"code": 0, "msg": "选课成功"}
+        if status != 204:
+            detail = result.get('detail') if isinstance(result, dict) else str(result)
+            raise HTTPException(status_code=status or 500, detail=detail)
+        return
 
 # =======================
-# 5. 退课
+# 4. 退课 (Shard写)
 # =======================
-@router.post("/courses/{course_id}/drop")
-async def drop_course(course_id: int, user: StudentDep):
+@router.post("/courses/{course_id}/drop", status_code=204)
+async def drop_course(
+    course_id: int, 
+    user: StudentDep,
+    ms_conn: MasterSlaveConnDep,
+    shard_conn: ShardConnDep
+):
     """
-    退课接口
-    写入：指定分片库 (开启事务)
+    学生退课接口。
+    
+    逻辑与抢课类似，解析ID后进行本地事务删除或远程转发。
+    
+    :param course_id: 课程ID。
+    :param user: 当前操作学生。
+    :param ms_conn: 主从库连接。
+    :param shard_conn: 分片库连接。
+    :return: 204 No Content (成功)。
     """
-    target_db = get_shard_by_course_id(course_id)
+    course_prefix = str(course_id)[:2]
+    campus_map = {'10': 'A', '11': 'B', '12': 'C'}
+    if course_prefix not in campus_map:
+        raise HTTPException(status_code=400, detail=err_course_id_invalid)
     
-    # async with target_db.transaction():
-    # DELETE FROM learn WHERE sid=:uid AND cid=:cid
-    # UPDATE course SET num_selected = num_selected - 1 WHERE id=:cid
-    
-    return {"code": 0, "msg": "退课成功"}
+    target_campus = campus_map[course_prefix]
+    target_url = settings.get_campus_web_url(target_campus)
+
+    if target_url is None:
+        await shard_router.deselect_course(
+            master_slave_conn=ms_conn,
+            shard_conn=shard_conn,
+            course_id=course_id,
+            stu_id=user.user_id
+        )
+        return
+    else:
+        full_url = f"{target_url.rstrip('/')}/api-private/v1/courses/{course_id}/deselect"
+        status, result = await remote_db_call(
+            url=full_url, 
+            method="POST", 
+            params={"stu_id": user.user_id}
+        )
+        if status != 204:
+            detail = result.get('detail') if isinstance(result, dict) else str(result)
+            raise HTTPException(status_code=status or 500, detail=detail)
+        return

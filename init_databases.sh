@@ -1,55 +1,58 @@
 #!/bin/bash
 # Initialize databases using original master.sql and shard.sql
-# Convert encoding (UTF-16 -> UTF-8) before import
+# Pre-requisite: You have manually removed SQL_LOG_BIN=0 and GTID_PURGED lines from master.sql
 
 echo "=========================================="
-echo "Initialize databases with original SQL files"
+echo "Initialize databases with clean SQL files"
 echo "=========================================="
 
-# Convert SQL file encoding (UTF-16 -> UTF-8)
+# 0. Convert SQL file encoding (UTF-16 -> UTF-8)
 echo ""
 echo "0. Converting SQL file encoding (UTF-16 -> UTF-8)..."
 iconv -f UTF-16LE -t UTF-8 db_init/master.sql > /tmp/master_utf8.sql 2>/dev/null || \
     iconv -f UTF-16 -t UTF-8 db_init/master.sql > /tmp/master_utf8.sql 2>/dev/null || \
-    echo "Warning: Encoding conversion may fail, using original file"
+    echo "Warning: Encoding conversion skipped (assuming UTF-8)"
 
 iconv -f UTF-16LE -t UTF-8 db_init/shard.sql > /tmp/shard_utf8.sql 2>/dev/null || \
     iconv -f UTF-16 -t UTF-8 db_init/shard.sql > /tmp/shard_utf8.sql 2>/dev/null || \
-    echo "Warning: Encoding conversion may fail, using original file"
+    echo "Warning: Encoding conversion skipped (assuming UTF-8)"
 
-# Drop and recreate database (clean initialization)
+# 1. Drop and recreate database (clean initialization)
 echo ""
 echo "1. Drop and recreate database school (clean initialization)..."
 echo "   Note: Master-slave replication will auto-sync, only operate on master"
 
-# Master-slave: Only operate on master, slaves will auto-sync via replication
+# Master: Recreate DB
 echo "   Drop and recreate master (slaves will auto-sync)..."
 docker exec mysql-master mysql -uroot -proot -e "DROP DATABASE IF EXISTS school; CREATE DATABASE school;" 2>/dev/null
 echo "   Waiting for replication sync (3 seconds)..."
 sleep 3
 
-# Shard: Independent operation (no replication)
+# Shard: Recreate DBs
 echo "   Drop and recreate shard databases..."
 for db_node in mysql-shard0 mysql-shard1 mysql-shard2; do
     docker exec $db_node mysql -uroot -proot -e "DROP DATABASE IF EXISTS school; CREATE DATABASE school;" 2>/dev/null
 done
 
-# Initialize master (skip GTID_PURGED line)
+# 2. Initialize master (mysql-master)
 echo ""
 echo "2. Initialize master (mysql-master)..."
-echo "   Note: Table structure will auto-sync to slaves via replication"
+echo "   Note: Since master.sql is clean, importing directly via cat"
+
 if [ -f /tmp/master_utf8.sql ]; then
-    sed '/SET @@GLOBAL.GTID_PURGED/d' /tmp/master_utf8.sql | docker exec -i mysql-master mysql -uroot -proot school 2>&1 | grep -v "Warning" | grep -v "^$" || echo "✓ Master initialized"
+    cat /tmp/master_utf8.sql | docker exec -i mysql-master mysql -uroot -proot school 2>&1 | grep -v "Warning" | grep -v "^$" || echo "✓ Master initialized"
 else
-    sed '/SET @@GLOBAL.GTID_PURGED/d' db_init/master.sql | docker exec -i mysql-master mysql -uroot -proot school 2>&1 | grep -v "Warning" | grep -v "^$" || echo "✓ Master initialized"
+    cat db_init/master.sql | docker exec -i mysql-master mysql -uroot -proot school 2>&1 | grep -v "Warning" | grep -v "^$" || echo "✓ Master initialized"
 fi
 
 echo "   Waiting for replication sync (3 seconds)..."
 sleep 3
 
-# Initialize shard databases
+# 3. Initialize shard databases
 echo ""
 echo "3. Initialize shard databases..."
+
+# Shard0
 echo "   Initializing shard0 (mysql-shard0)..."
 if [ -f /tmp/shard_utf8.sql ]; then
     cat /tmp/shard_utf8.sql | docker exec -i mysql-shard0 mysql -uroot -proot school 2>&1 | grep -v "Warning" | grep -v "^$" || echo "   ✓ Shard0 initialized"
@@ -57,6 +60,7 @@ else
     cat db_init/shard.sql | docker exec -i mysql-shard0 mysql -uroot -proot school 2>&1 | grep -v "Warning" | grep -v "^$" || echo "   ✓ Shard0 initialized"
 fi
 
+# Shard1
 echo "   Initializing shard1 (mysql-shard1)..."
 if [ -f /tmp/shard_utf8.sql ]; then
     cat /tmp/shard_utf8.sql | docker exec -i mysql-shard1 mysql -uroot -proot school 2>&1 | grep -v "Warning" | grep -v "^$" || echo "   ✓ Shard1 initialized"
@@ -64,6 +68,7 @@ else
     cat db_init/shard.sql | docker exec -i mysql-shard1 mysql -uroot -proot school 2>&1 | grep -v "Warning" | grep -v "^$" || echo "   ✓ Shard1 initialized"
 fi
 
+# Shard2
 echo "   Initializing shard2 (mysql-shard2)..."
 if [ -f /tmp/shard_utf8.sql ]; then
     cat /tmp/shard_utf8.sql | docker exec -i mysql-shard2 mysql -uroot -proot school 2>&1 | grep -v "Warning" | grep -v "^$" || echo "   ✓ Shard2 initialized"
@@ -83,7 +88,7 @@ echo "Verifying table structure:"
 echo "Master tables:"
 docker exec mysql-master mysql -uroot -proot school -e "SHOW TABLES;" 2>&1 | grep -v "Warning" | grep -E "Tables_in_school|student|teacher|selection_batch"
 echo ""
-echo "Slave1 tables (replication sync):"
+echo "Slave1 tables (replication sync check):"
 docker exec mysql-slave1 mysql -uroot -proot school -e "SHOW TABLES;" 2>&1 | grep -v "Warning" | grep -E "Tables_in_school|student|teacher|selection_batch"
 echo ""
 echo "Shard0 tables:"

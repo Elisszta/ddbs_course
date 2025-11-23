@@ -14,7 +14,7 @@ from app.routers.dbprivate import shard_router, master_router
 from app.utils.classify_helper import get_user_role
 from app.utils.database import db, get_master_slave_connection
 from app.settings import settings
-from app.utils.auth import get_current_student, get_current_admin_or_teacher, UserDep
+from app.utils.auth import get_current_student, get_current_admin_or_teacher, get_current_admin, UserDep, AdminDep, StudentDep
 from app.models.user_model import CurUser
 
 
@@ -52,23 +52,28 @@ async def login(master_slave_conn: Annotated[AsyncConnection, Depends(get_master
 # FOR TESTING
 # ================
 
-# # 1. 伪造一个“学生”身份 (学号 1120250001)
-# async def mock_get_current_student():
-#     return CurUser(user_id=1120250001, role="student")
+from app.models.user_model import CurUser
+from app.utils.auth import get_current_student, get_current_admin, get_current_user, get_current_admin_or_teacher
 
-# # 2. 伪造一个“教师”身份 (工号 1220250001)
-# async def mock_get_current_teacher():
-#     return CurUser(user_id=1220250001, role="teacher")
+# 1. 伪造一个“全能管理员”
+async def mock_admin():
+    # role 必须是 admin
+    return CurUser(user_id=1020250001, role="admin")
 
-# # 3. 覆盖 FastAPI 的依赖注入
-# # 当 Router 里的函数请求 get_current_student 时，FastAPI 会拦截并执行 mock_get_current_student
-# app.dependency_overrides[get_current_student] = mock_get_current_student
-# app.dependency_overrides[get_current_admin_or_teacher] = mock_get_current_teacher
+# 2. 伪造一个“普通学生”
+async def mock_student():
+    # role 必须是 student
+    return CurUser(user_id=1120250001, role="student")
 
-# # 4. 同时覆盖通用的 UserDep，防止有些接口用的是通用依赖
-# async def mock_user_dep():
-#     # 这里默认返回学生，如果你测教师接口报错，可以临时改成返回教师
-#     return CurUser(user_id=1120250001, role="student")
-# app.dependency_overrides[UserDep] = mock_user_dep
+# 3. 伪造一个“教师”
+async def mock_teacher():
+    return CurUser(user_id=1020251100, role="teacher")
 
-# print("\n 注意: 已启用测试模式，身份验证被 Mock 覆盖，所有请求无需 Token \n")
+# 4. 启用覆盖！
+# 注意：这里的中括号里必须填函数名，不能填 StudentDep/AdminDep
+# app.dependency_overrides[get_current_admin] = mock_admin
+# app.dependency_overrides[get_current_student] = mock_student
+app.dependency_overrides[get_current_admin_or_teacher] = mock_teacher
+# app.dependency_overrides[get_current_user] = mock_student # 通用兜底
+
+print("\n测试模式已启动：身份验证被 Mock 覆盖\n")

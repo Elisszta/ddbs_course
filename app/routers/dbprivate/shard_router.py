@@ -254,6 +254,11 @@ async def create_course(master_slave_conn: MasterSlaveConnDep, shard_conn: Shard
     # 检查教师是否存在，顺便锁定行防止教师被删
     if (await master_slave_conn.execute(text(f"SELECT COUNT(*) FROM teacher WHERE id IN ({','.join([str(teacher_id) for teacher_id in p.teacher_ids])}) LOCK IN SHARE MODE"))).scalar() != len(p.teacher_ids):
         raise HTTPException(status_code=404, detail=err_teacher_not_exist)
+
+    ##### DEBUG:Check DB Info #####
+    db_info = (await shard_conn.execute(text("SELECT @@server_id, @@hostname"))).fetchone()
+    print(f"\nShard Write] 正在写入分片库 | Server ID: {db_info[0]} | Hostname: {db_info[1]}\n")
+
     # 生成id
     # 无锁，如果真的有并发插入导致id重了，那就返回409让用户重试呗
     new_id = await gen_course_id(shard_conn)

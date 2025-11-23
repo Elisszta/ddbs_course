@@ -31,3 +31,18 @@ class StudentResp(BaseModel):
 class StudentQueryResp(BaseModel):
     total: int
     result: list[StudentResp]
+
+
+class StudentCreateParams(BaseModel):
+    id: int
+    name: str
+    sex: Literal['M', 'F']
+    age: int
+    current_campus: Literal['A', 'B', 'C']
+
+
+class TeacherCreateParams(BaseModel):
+    id: int
+    name: str
+    sex: Literal['M', 'F']
+    age: int

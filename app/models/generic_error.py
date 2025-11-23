@@ -23,3 +23,5 @@ err_invalid_token = BizError(code=30003, msg='Invalid token').model_dump()
 err_expired_token = BizError(code=30004, msg='Expired token').model_dump()
 err_selection_time = BizError(code=30005, msg='Course selection time has not arrived').model_dump()
 err_bad_gateway = BizError(code=40001, msg='Bad gateway').model_dump()
+err_course_id_invalid = 'Invalid course ID format'
+err_user_exist = 'User already exists'

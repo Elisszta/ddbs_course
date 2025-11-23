@@ -1,91 +1,84 @@
 #!/bin/bash
-# Setup MySQL master-slave replication configuration script
+# Setup MySQL master-slave replication (Bulletproof Version)
+# Fixes: Uses single-line commands (-e) instead of heredoc to avoid formatting issues
 
 echo "=========================================="
 echo "Setup MySQL Master-Slave Replication"
 echo "=========================================="
 
-# Wait for MySQL containers to be ready
-echo "Waiting for MySQL containers to start..."
-sleep 5
+# Function to check MySQL readiness
+wait_for_mysql() {
+    local host=$1
+    echo "Waiting for $host to be ready..."
+    until docker exec $host mysql -uroot -proot -e "SELECT 1" > /dev/null 2>&1; do
+        echo "   ...waiting for $host..."
+        sleep 2
+    done
+    echo "$host is ready!"
+}
 
-# Get master container IP (in Docker network)
-MASTER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' mysql-master)
+# 1. Wait for all containers
+wait_for_mysql "mysql-master"
+wait_for_mysql "mysql-slave1"
+wait_for_mysql "mysql-slave2"
 
-if [ -z "$MASTER_IP" ]; then
-    echo "Error: Cannot get master IP address"
-    exit 1
-fi
-
-echo "Master IP: $MASTER_IP"
-
-# 1. Create replication user on master
+# 2. Configure Master (Create Replication User)
 echo ""
-echo "1. Creating replication user on master..."
-docker exec mysql-master mysql -uroot -proot <<EOF
-CREATE USER IF NOT EXISTS 'repl'@'%' IDENTIFIED BY 'repl123';
-GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';
-FLUSH PRIVILEGES;
-SELECT User, Host FROM mysql.user WHERE User='repl';
-EOF
+echo "🛠️  Creating replication user on Master..."
+docker exec mysql-master mysql -uroot -proot -e "
+    CREATE USER IF NOT EXISTS 'repl'@'%' IDENTIFIED WITH mysql_native_password BY 'repl123';
+    GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';
+    FLUSH PRIVILEGES;
+" && echo "   -> User 'repl' created successfully."
 
-# 2. Get master GTID position
+# 3. Configure Slave 1
 echo ""
-echo "2. Getting master GTID position..."
-MASTER_GTID=$(docker exec mysql-master mysql -uroot -proot -e "SELECT @@GLOBAL.GTID_EXECUTED;" -s -N 2>/dev/null | tail -1)
-echo "Master GTID: $MASTER_GTID"
+echo "🛠️  Configuring Slave 1..."
+docker exec mysql-slave1 mysql -uroot -proot -e "
+    STOP SLAVE;
+    RESET SLAVE ALL;
+    CHANGE MASTER TO 
+      MASTER_HOST='mysql-master', 
+      MASTER_PORT=3306, 
+      MASTER_USER='repl', 
+      MASTER_PASSWORD='repl123', 
+      MASTER_AUTO_POSITION=1;
+    START SLAVE;
+" && echo "   -> Slave 1 configured."
 
-# 3. Configure slave1 to connect to master
+# 4. Configure Slave 2
 echo ""
-echo "3. Configuring slave1 (mysql-slave1)..."
-docker exec mysql-slave1 mysql -uroot -proot <<EOF
-STOP SLAVE;
-RESET SLAVE;
-CHANGE MASTER TO
-    MASTER_HOST='$MASTER_IP',
-    MASTER_PORT=3306,
-    MASTER_USER='repl',
-    MASTER_PASSWORD='repl123',
-    MASTER_AUTO_POSITION=1;
-START SLAVE;
-EOF
+echo "Configuring Slave 2..."
+docker exec mysql-slave2 mysql -uroot -proot -e "
+    STOP SLAVE;
+    RESET SLAVE ALL;
+    CHANGE MASTER TO 
+      MASTER_HOST='mysql-master', 
+      MASTER_PORT=3306, 
+      MASTER_USER='repl', 
+      MASTER_PASSWORD='repl123', 
+      MASTER_AUTO_POSITION=1;
+    START SLAVE;
+" && echo "   -> Slave 2 configured."
 
-# 4. Configure slave2 to connect to master
-echo ""
-echo "4. Configuring slave2 (mysql-slave2)..."
-docker exec mysql-slave2 mysql -uroot -proot <<EOF
-STOP SLAVE;
-RESET SLAVE;
-CHANGE MASTER TO
-    MASTER_HOST='$MASTER_IP',
-    MASTER_PORT=3306,
-    MASTER_USER='repl',
-    MASTER_PASSWORD='repl123',
-    MASTER_AUTO_POSITION=1;
-START SLAVE;
-EOF
-
-# 5. Check replication status
+# 5. Final Status Check
 echo ""
 echo "=========================================="
-echo "Checking replication status"
+echo "Checking Replication Status"
 echo "=========================================="
+sleep 2
 
-echo ""
-echo "Slave1 (mysql-slave1) status:"
-docker exec mysql-slave1 mysql -uroot -proot -e "SHOW SLAVE STATUS\G" 2>&1 | grep -E "Slave_IO_Running|Slave_SQL_Running|Seconds_Behind_Master|Last_IO_Error|Last_SQL_Error" | grep -v "Warning"
+check_status() {
+    local host=$1
+    echo ""
+    echo "$host Status:"
+    docker exec $host mysql -uroot -proot -e "SHOW SLAVE STATUS\G" | grep -E "Slave_IO_Running:|Slave_SQL_Running:|Last_IO_Error:|Last_SQL_Error:"
+}
 
-echo ""
-echo "Slave2 (mysql-slave2) status:"
-docker exec mysql-slave2 mysql -uroot -proot -e "SHOW SLAVE STATUS\G" 2>&1 | grep -E "Slave_IO_Running|Slave_SQL_Running|Seconds_Behind_Master|Last_IO_Error|Last_SQL_Error" | grep -v "Warning"
+check_status "mysql-slave1"
+check_status "mysql-slave2"
 
 echo ""
 echo "=========================================="
-echo "Master-slave replication setup completed!"
+echo "Setup Completed!"
 echo "=========================================="
-echo ""
-echo "Verification steps:"
-echo "1. On master: docker exec mysql-master mysql -uroot -proot -e \"CREATE DATABASE test_replication;\""
-echo "2. Check slave: docker exec mysql-slave1 mysql -uroot -proot -e \"SHOW DATABASES LIKE 'test_replication';\""
-echo "3. If you can see test_replication database, replication is working!"
-
