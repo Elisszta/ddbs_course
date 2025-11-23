@@ -1,7 +1,7 @@
 from typing import Self
 
 from pydantic import model_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 环境变量配置
 
@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     campus_c_web_url: str | None = None
     jwt_secret: str
     db_api_secret: str
+
+    # Reading from .env file
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding='utf-8',
+        extra='ignore'
+    )
 
     @model_validator(mode='after')
     def check_campus(self) -> Self:
