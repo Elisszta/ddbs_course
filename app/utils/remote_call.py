@@ -2,10 +2,10 @@ from typing import Any
 
 import aiohttp
 
-from app.utils.settings import settings
+from app.settings import settings
 
 
-async def remote_call(
+async def remote_db_call(
         url: str,
         method: str = 'GET',
         headers: dict[str, str] | None = None,

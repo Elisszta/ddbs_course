@@ -13,7 +13,7 @@ from app.models.user_model import StudentQueryResp, StudentResp
 from app.utils.auth import verify_db_api
 from app.utils.classify_helper import get_user_role
 from app.utils.database import get_master_slave_connection, get_shard_connection
-from app.utils.settings import settings
+from app.settings import settings
 
 
 MasterSlaveConnDep = Annotated[AsyncConnection, Depends(get_master_slave_connection)]
@@ -22,7 +22,7 @@ ShardConnDep = Annotated[AsyncConnection, Depends(get_shard_connection)]
 
 router = APIRouter(
     prefix='/api-private/v1',
-    tags=['DB Cross Site Private API'],
+    tags=['Cross Site Shard DB Private API'],
     responses={403: {'model': GenericError, 'description': 'Insufficient permission'}},
     dependencies=(Depends(verify_db_api),)
 )
@@ -36,7 +36,7 @@ async def delete_user(shard_conn: ShardConnDep, user_id: int):
     # 删用户，要把teach表或learn表相关条目删了，如果是learn表的，对应课程已选人数要减少
     """
     用户删除分库路由函数。删除用户时必须原地调用+所有远程http调用
-    :param shard_conn: 本地分片库连接，不自动事务
+    :param shard_conn: 本地分片库连接
     :param user_id: 用户id
     :return:
     """

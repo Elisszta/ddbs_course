@@ -9,10 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.models.generic_error import err_invalid_uid
 from app.models.user_model import UserLoginParams, UserLoginResp
-from app.routers import db_router, course_router
+from app.routers import course_router
+from app.routers.dbprivate import shard_router, master_router
 from app.utils.classify_helper import get_user_role
 from app.utils.database import db, get_master_slave_connection
-from app.utils.settings import settings
+from app.settings import settings
 
 
 @asynccontextmanager
@@ -22,7 +23,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
-app.include_router(db_router.router)
+app.include_router(shard_router.router)
+app.include_router(master_router.router)
 app.include_router(course_router.router)
 
 

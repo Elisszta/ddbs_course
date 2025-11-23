@@ -7,7 +7,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from app.models.generic_error import err_no_permission, err_invalid_token, err_expired_token, err_invalid_uid
 from app.models.user_model import CurUser
 from app.utils.classify_helper import get_user_role
-from app.utils.settings import settings
+from app.settings import settings
 
 security = HTTPBearer()
 CredDep = Annotated[HTTPAuthorizationCredentials, Depends(security)]

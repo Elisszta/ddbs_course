@@ -12,10 +12,11 @@ from pydantic_settings import BaseSettings
 # CAMPUS_B_WEB_URL B校区web应用的url
 # CAMPUS_C_WEB_URL C校区web应用的url
 # 哪个留空就表示当前是哪个校区
+# A校区是主校区（主库所在）
 # 校区对应课程编号：A:10 B:11 C:12
 
 # JWT_SECRET 用于生成jwt的密钥（全局统一）
-# DB_API_SECRET 访问远程分片数据库API的密钥（全局统一）
+# DB_API_SECRET 访问远程数据库API的密钥（全局统一）
 
 class Settings(BaseSettings):
     db_master_slave_url: str
@@ -54,6 +55,9 @@ class Settings(BaseSettings):
         if campus == 'B':
             return self.campus_b_web_url
         return self.campus_c_web_url
+
+    def is_master(self) -> bool:
+        return self.campus_a_web_url is None
 
 
 # 实例化Settings对象
