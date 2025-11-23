@@ -52,23 +52,23 @@ async def login(master_slave_conn: Annotated[AsyncConnection, Depends(get_master
 # FOR TESTING
 # ================
 
-# 1. 伪造一个“学生”身份 (学号 1120250001)
-async def mock_get_current_student():
-    return CurUser(user_id=1120250001, role="student")
+# # 1. 伪造一个“学生”身份 (学号 1120250001)
+# async def mock_get_current_student():
+#     return CurUser(user_id=1120250001, role="student")
 
-# 2. 伪造一个“教师”身份 (工号 1220250001)
-async def mock_get_current_teacher():
-    return CurUser(user_id=1220250001, role="teacher")
+# # 2. 伪造一个“教师”身份 (工号 1220250001)
+# async def mock_get_current_teacher():
+#     return CurUser(user_id=1220250001, role="teacher")
 
-# 3. 覆盖 FastAPI 的依赖注入
-# 当 Router 里的函数请求 get_current_student 时，FastAPI 会拦截并执行 mock_get_current_student
-app.dependency_overrides[get_current_student] = mock_get_current_student
-app.dependency_overrides[get_current_admin_or_teacher] = mock_get_current_teacher
+# # 3. 覆盖 FastAPI 的依赖注入
+# # 当 Router 里的函数请求 get_current_student 时，FastAPI 会拦截并执行 mock_get_current_student
+# app.dependency_overrides[get_current_student] = mock_get_current_student
+# app.dependency_overrides[get_current_admin_or_teacher] = mock_get_current_teacher
 
-# 4. 同时覆盖通用的 UserDep，防止有些接口用的是通用依赖
-async def mock_user_dep():
-    # 这里默认返回学生，如果你测教师接口报错，可以临时改成返回教师
-    return CurUser(user_id=1120250001, role="student")
-app.dependency_overrides[UserDep] = mock_user_dep
+# # 4. 同时覆盖通用的 UserDep，防止有些接口用的是通用依赖
+# async def mock_user_dep():
+#     # 这里默认返回学生，如果你测教师接口报错，可以临时改成返回教师
+#     return CurUser(user_id=1120250001, role="student")
+# app.dependency_overrides[UserDep] = mock_user_dep
 
-print("\n 注意: 已启用测试模式，身份验证被 Mock 覆盖，所有请求无需 Token ⚠️\n")
+# print("\n 注意: 已启用测试模式，身份验证被 Mock 覆盖，所有请求无需 Token \n")
