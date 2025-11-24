@@ -32,7 +32,7 @@ router = APIRouter(
 # todo 管理员删除学生的同时该学生选课，参照完整性大概率崩掉（其实是可以不出问题的，但是需要上表级锁）
 # todo 缓解方法：选退课时段内禁止管理员创建、更新、删除（可以做到）+只允许一个管理员在线（懒得搞）（最终提交代码前删除这些注释）
 @router.delete('/users/{user_id}', status_code=204)
-async def delete_user(shard_conn: ShardConnDep, user_id: int):
+async def delete_user_private(shard_conn: ShardConnDep, user_id: int):
     # 删用户，要把teach表或learn表相关条目删了，如果是learn表的，对应课程已选人数要减少
     """
     用户删除分库路由函数。删除用户时必须原地调用+所有远程http调用
@@ -54,7 +54,7 @@ async def delete_user(shard_conn: ShardConnDep, user_id: int):
 
 
 @router.post('/courses/{course_id}/select', status_code=204)
-async def select_course(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, course_id: int, stu_id: int):
+async def select_course_private(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, course_id: int, stu_id: int):
     """
     选课分库路由函数。若课程校区就在本地，可直接原地调用该函数
     :param master_slave_conn: 本地主从库连接
@@ -78,7 +78,7 @@ async def select_course(master_slave_conn: MasterSlaveConnDep, shard_conn: Shard
 
 
 @router.post('/courses/{course_id}/deselect', status_code=204)
-async def deselect_course(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, course_id: int, stu_id: int):
+async def deselect_course_private(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, course_id: int, stu_id: int):
     """
     退课分库路由函数。若课程校区就在本地，可直接原地调用该函数
     :param master_slave_conn: 本地主从库连接
@@ -97,7 +97,7 @@ async def deselect_course(master_slave_conn: MasterSlaveConnDep, shard_conn: Sha
 
 
 @router.get('/courses/{course_id}/students')
-async def get_course_students(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, course_id: int) -> StudentQueryResp:
+async def get_course_students_private(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, course_id: int) -> StudentQueryResp:
     """
     查课程学生分库路由函数。若课程校区就在本地，可直接原地调用该函数
     :param master_slave_conn: 本地主从库连接
@@ -152,7 +152,7 @@ async def build_course_filter_sql(
 
 
 @router.get('/courses')
-async def query_courses(
+async def query_courses_private(
         master_slave_conn: MasterSlaveConnDep,
         shard_conn: ShardConnDep,
         course: int | str | None = None,
@@ -245,7 +245,7 @@ async def gen_course_id(shard_conn: ShardConnDep) -> int | None:
 
 
 @router.post('/courses', status_code=201)
-async def create_course(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, p: CourseCreateParams) -> CourseCreateResp:
+async def create_course_private(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, p: CourseCreateParams) -> CourseCreateResp:
     """
     课程创建分库路由函数。若课程校区就在本地，可直接原地调用该函数
     :param master_slave_conn: 本地主从库连接
@@ -280,7 +280,7 @@ async def create_course(master_slave_conn: MasterSlaveConnDep, shard_conn: Shard
 
 
 @router.delete('/courses/{course_id}', status_code=204)
-async def delete_course(shard_conn: ShardConnDep, course_id: int):
+async def delete_course_private(shard_conn: ShardConnDep, course_id: int):
     """
     课程删除分库路由函数。若课程校区就在本地，可直接原地调用该函数
     :param shard_conn: 本地分片库连接
@@ -291,7 +291,7 @@ async def delete_course(shard_conn: ShardConnDep, course_id: int):
 
 
 @router.put('/courses/{course_id}', status_code=204)
-async def update_course(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, course_id: int, p: CourseUpdateParams):
+async def update_course_private(master_slave_conn: MasterSlaveConnDep, shard_conn: ShardConnDep, course_id: int, p: CourseUpdateParams):
     """
     课程更新分库路由函数。若课程校区就在本地，可直接原地调用该函数
     :param master_slave_conn: 本地主从库连接
