@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -5,7 +6,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.models.generic_error import GenericError, err_user_exist
+from app.models.generic_error import GenericError, err_user_exist, err_selection_batch_not_exist
+from app.models.selection_batch_model import SelectionBatchCreateParams, SelectionBatchResp
 from app.models.user_model import StudentCreateParams, TeacherCreateParams
 from app.utils.auth import verify_db_api
 from app.utils.database import get_master_slave_connection
@@ -75,3 +77,14 @@ async def create_teacher_private(conn: MasterSlaveConnDep, p: TeacherCreateParam
         raise HTTPException(status_code=409, detail=err_user_exist)
     
     return {"msg": "success"}
+
+
+@router.post('/selection-batches', status_code=201)
+async def create_selection_batch_private(conn: MasterSlaveConnDep, p: SelectionBatchCreateParams) -> SelectionBatchResp:
+    await conn.execute(text('INSERT INTO selection_batch (name, begin_time, end_time) VALUES (:name, :begin_time, :end_time)'), p.model_dump())
+    return SelectionBatchResp(batch_id=(await conn.execute(text('SELECT LAST_INSERT_ID()'))).scalar(), name=p.name, begin_time=p.begin_time, end_time=p.end_time, status='future')
+
+
+@router.delete('/selection-batches/{batch_id}', status_code=204)
+async def delete_selection_batch_private(conn: MasterSlaveConnDep, batch_id: int):
+    await conn.execute(text('DELETE FROM selection_batch WHERE id = :id'), {'id': batch_id})

@@ -17,7 +17,7 @@ from app.utils.remote_call import remote_db_call
 MasterSlaveConnDep = Annotated[AsyncConnection, Depends(get_master_slave_connection)]
 ShardConnDep = Annotated[AsyncConnection, Depends(get_shard_connection)]
 
-router = APIRouter(prefix="api/v1/students", tags=["Student"])
+router = APIRouter(prefix="/api/v1/students", tags=["Student"])
 
 # =======================
 # 1. 管理员添加学生 (Master写)
