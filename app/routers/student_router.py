@@ -17,12 +17,12 @@ from app.utils.remote_call import remote_db_call
 MasterSlaveConnDep = Annotated[AsyncConnection, Depends(get_master_slave_connection)]
 ShardConnDep = Annotated[AsyncConnection, Depends(get_shard_connection)]
 
-router = APIRouter(prefix="/student", tags=["Student"])
+router = APIRouter(prefix="api/v1/students", tags=["Student"])
 
 # =======================
 # 1. 管理员添加学生 (Master写)
 # =======================
-@router.post("/add", status_code=201)
+@router.post("", status_code=201)
 async def add_student(
     conn: MasterSlaveConnDep, 
     student: StudentCreateParams, 
@@ -71,6 +71,8 @@ async def add_student(
             
     return {"msg": "Student created"}
 
+
+# todo 重复了
 # =======================
 # 2. 查询全校课程 (Shard读)
 # =======================
@@ -139,6 +141,8 @@ async def list_courses(
              raise HTTPException(status_code=status or 500, detail=detail)
         return result
 
+
+# todo 重复了
 # =======================
 # 3. 抢课 (Shard写)
 # =======================
@@ -198,6 +202,8 @@ async def select_course(
             raise HTTPException(status_code=status or 500, detail=detail)
         return
 
+
+# todo 重复了
 # =======================
 # 4. 退课 (Shard写)
 # =======================

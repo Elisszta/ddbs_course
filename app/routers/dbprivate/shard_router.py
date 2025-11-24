@@ -30,7 +30,7 @@ router = APIRouter(
 
 # todo 管理员删除学生的同时该学生退课，有死锁的可能
 # todo 管理员删除学生的同时该学生选课，参照完整性大概率崩掉（其实是可以不出问题的，但是需要上表级锁）
-# todo 缓解方法：选退课时段内禁止管理员创建、更新、删除（可以做到）+只允许一个管理员在线（最终提交代码前删除这些注释）
+# todo 缓解方法：选退课时段内禁止管理员创建、更新、删除（可以做到）+只允许一个管理员在线（懒得搞）（最终提交代码前删除这些注释）
 @router.delete('/users/{user_id}', status_code=204)
 async def delete_user(shard_conn: ShardConnDep, user_id: int):
     # 删用户，要把teach表或learn表相关条目删了，如果是learn表的，对应课程已选人数要减少
@@ -190,6 +190,8 @@ async def query_courses(
         await shard_conn.execute(text(f'INSERT INTO tmp_cid_tid SELECT tmp.id, t.tid FROM (course c {join_sql} WHERE {where_sql}) tmp JOIN teach t ON tmp.id = t.cid'), params)
         distinct_teachers_id = (await shard_conn.execute(text('SELECT DISTINCT tid FROM tmp_cid_tid'))).scalars().all()
         table_name = 'tmp_cid_tid'
+    if len(distinct_teachers_id) == 0:
+        return CourseQueryResp(total=0, result=[])  # 没有课程记录，快速返回
     result = await master_slave_conn.execute(text(f"SELECT id, name FROM teacher WHERE id IN ({','.join([str(teacher_id) for teacher_id in distinct_teachers_id])})"))
     await shard_conn.execute(text('INSERT INTO tmp_tid_name (tid, name) VALUES (:tid, :name)'), [{'tid': row[0], 'name': row[1]} for row in result.all()])
     if stu_id is None:

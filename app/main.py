@@ -7,7 +7,7 @@ from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.models.generic_error import err_invalid_uid
+from app.models.generic_error import err_invalid_uid, GenericError
 from app.models.user_model import UserLoginParams, UserLoginResp
 from app.routers import course_router, student_router, teacher_router
 from app.routers.dbprivate import shard_router, master_router
@@ -32,7 +32,7 @@ app.include_router(student_router.router)
 app.include_router(teacher_router.router)
 
 
-@app.post('/api/v1/login')
+@app.post('/api/v1/login', responses={403: {'model': GenericError, 'description': 'Insufficient permission'}})
 async def login(master_slave_conn: Annotated[AsyncConnection, Depends(get_master_slave_connection)], p: UserLoginParams) -> UserLoginResp:
     if p.user_id < 1000000000 or p.user_id >= 1400000000:
         raise HTTPException(status_code=403, detail=err_invalid_uid)

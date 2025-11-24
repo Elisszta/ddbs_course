@@ -30,8 +30,3 @@ class CourseResp(BaseModel):
 class CourseQueryResp(BaseModel):
     total: int
     result: list[CourseResp]
-
-
-class CourseSelectParams(BaseModel):
-    course_id: int
-    stu_id: int

@@ -33,7 +33,7 @@ router = APIRouter(
 )
 
 
-@router.get('/')
+@router.get('')
 async def query_courses(
         cur_user: UserDep,
         master_slave_conn: MasterSlaveConnDep,
@@ -81,7 +81,7 @@ async def query_courses(
     return CourseQueryResp(total=len(final_list), result=final_list)
 
 
-@router.post('/', status_code=201, responses={
+@router.post('', status_code=201, responses={
     404: {'model': GenericError, 'description': 'Teacher does not exist'},
     409: {'model': GenericError, 'description': 'Course id conflict or full'},
     502: {'model': GenericError, 'description': 'Remote not responding'}
