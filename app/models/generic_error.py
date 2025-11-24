@@ -25,3 +25,5 @@ err_selection_time = BizError(code=30005, msg='Course selection time has not arr
 err_bad_gateway = BizError(code=40001, msg='Bad gateway').model_dump()
 err_course_id_invalid = 'Invalid course ID format'
 err_user_exist = 'User already exists'
+err_student_not_exist = 'Student does not exist'
+err_teacher_not_exist = 'Teacher does not exist'

@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -41,8 +41,32 @@ class StudentCreateParams(BaseModel):
     current_campus: Literal['A', 'B', 'C']
 
 
+class StudentUpdateParams(BaseModel):
+    name: Optional[str] = None
+    sex: Optional[Literal['M', 'F']] = None
+    age: Optional[int] = None
+    current_campus: Optional[Literal['A', 'B', 'C']] = None
+
+
+class StudentSimpleResp(BaseModel):
+    id: int
+    name: str
+
+
 class TeacherCreateParams(BaseModel):
     id: int
     name: str
     sex: Literal['M', 'F']
     age: int
+
+
+class TeacherUpdateParams(BaseModel):
+    name: Optional[str] = None
+    sex: Optional[Literal['M', 'F']] = None
+    age: Optional[int] = None
+
+
+class TeacherSimpleResp(BaseModel):
+    id: int
+    name: str
+    

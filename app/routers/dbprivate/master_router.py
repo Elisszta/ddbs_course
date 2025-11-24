@@ -5,8 +5,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.models.generic_error import GenericError, err_user_exist
-from app.models.user_model import StudentCreateParams, TeacherCreateParams
+from app.models.generic_error import GenericError, err_user_exist, err_student_not_exist, err_teacher_not_exist
+from app.models.user_model import StudentCreateParams, TeacherCreateParams, StudentUpdateParams, TeacherUpdateParams
 from app.utils.auth import verify_db_api
 from app.utils.database import get_master_slave_connection
 
@@ -49,6 +49,49 @@ async def create_student_private(conn: MasterSlaveConnDep, p: StudentCreateParam
     return {"msg": "success"}
 
 
+@router.delete('/students/{student_id}', status_code=204)
+async def delete_student_private(conn: MasterSlaveConnDep, student_id: int):
+    """[私有接口] 在主库删除学生"""
+    result = await conn.execute(text("DELETE FROM student WHERE id = :id"), {"id": student_id})
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail=err_student_not_exist)
+    return None
+
+
+@router.put('/students/{student_id}', status_code=204)
+async def update_student_private(conn: MasterSlaveConnDep, student_id: int, p: StudentUpdateParams):
+    """【私有接口】在主库更新学生"""
+    updates = []
+    params = {"id": student_id}
+    
+    # 动态构建 SQL SET 子句
+    if p.name is not None: updates.append("name = :name"); params["name"] = p.name
+    if p.sex is not None: updates.append("sex = :sex"); params["sex"] = p.sex
+    if p.age is not None: updates.append("age = :age"); params["age"] = p.age
+    if p.current_campus is not None: updates.append("current_campus = :current_campus"); params["current_campus"] = p.current_campus
+    
+    # 情况 1: 没有字段需要更新
+    if not updates: 
+        # 即使无更新字段，也要检查 ID 是否存在，以符合 RESTful 语义
+        check = await conn.execute(text("SELECT 1 FROM student WHERE id = :id"), {"id": student_id})
+        if check.scalar() is None:
+            raise HTTPException(status_code=404, detail=err_student_not_exist)
+        return None
+
+    # 执行更新
+    sql = f"UPDATE student SET {', '.join(updates)} WHERE id = :id"
+    result = await conn.execute(text(sql), params)
+    
+    # 情况 2: 执行了 SQL 但 rowcount 为 0
+    # 可能是数据完全没变，也可能是 ID 不存在
+    if result.rowcount == 0:
+        check = await conn.execute(text("SELECT 1 FROM student WHERE id = :id"), {"id": student_id})
+        if check.scalar() is None:
+            raise HTTPException(status_code=404, detail=err_student_not_exist)
+            
+    return None
+
+
 @router.post('/teachers', status_code=201)
 async def create_teacher_private(conn: MasterSlaveConnDep, p: TeacherCreateParams):
     """
@@ -75,3 +118,45 @@ async def create_teacher_private(conn: MasterSlaveConnDep, p: TeacherCreateParam
         raise HTTPException(status_code=409, detail=err_user_exist)
     
     return {"msg": "success"}
+
+
+@router.delete('/teachers/{teacher_id}', status_code=204)
+async def delete_teacher_private(conn: MasterSlaveConnDep, teacher_id: int):
+    """【私有接口】在主库删除教师"""
+    result = await conn.execute(text("DELETE FROM teacher WHERE id = :id"), {"id": teacher_id})
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail=err_teacher_not_exist)
+    return None
+
+
+@router.put('/teachers/{teacher_id}', status_code=204)
+async def update_teacher_private(conn: MasterSlaveConnDep, teacher_id: int, p: TeacherUpdateParams):
+    """【私有接口】在主库更新教师"""
+    updates = []
+    params = {"id": teacher_id}
+    
+    if p.name is not None:
+        updates.append("name = :name"); params["name"] = p.name
+    if p.sex is not None:
+        updates.append("sex = :sex"); params["sex"] = p.sex
+    if p.age is not None:
+        updates.append("age = :age"); params["age"] = p.age
+        
+    if not updates:
+        # 如果没有字段需要更新，但仍需确认 ID 是否存在
+        check = await conn.execute(text("SELECT 1 FROM teacher WHERE id = :id"), {"id": teacher_id})
+        if check.scalar() is None:
+            raise HTTPException(status_code=404, detail=err_teacher_not_exist)
+        return None
+
+    sql = f"UPDATE teacher SET {', '.join(updates)} WHERE id = :id"
+    result = await conn.execute(text(sql), params)
+    
+    # 如果 rowcount 为 0，可能是数据没变，也可能是 ID 不存在
+    # 需要进一步查询确认
+    if result.rowcount == 0:
+        check = await conn.execute(text("SELECT 1 FROM teacher WHERE id = :id"), {"id": teacher_id})
+        if check.scalar() is None:
+            raise HTTPException(status_code=404, detail=err_teacher_not_exist)
+            
+    return None

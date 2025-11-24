@@ -1,15 +1,14 @@
-from typing import Annotated
+from typing import Annotated, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.models.course_model import CourseQueryResp
-from app.models.generic_error import err_course_id_invalid, err_user_exist
-from app.models.user_model import StudentCreateParams
-from app.routers.dbprivate import shard_router  # 导入私有路由模块以便本地直接调用
+from app.models.generic_error import err_student_not_exist
+from app.models.user_model import StudentCreateParams, StudentUpdateParams, StudentSimpleResp
+from app.routers.dbprivate import shard_router, master_router
 from app.settings import settings
-from app.utils.auth import StudentDep, AdminDep
+from app.utils.auth import AdminDep
 from app.utils.database import get_master_slave_connection, get_shard_connection
 from app.utils.remote_call import remote_db_call
 
@@ -17,7 +16,7 @@ from app.utils.remote_call import remote_db_call
 MasterSlaveConnDep = Annotated[AsyncConnection, Depends(get_master_slave_connection)]
 ShardConnDep = Annotated[AsyncConnection, Depends(get_shard_connection)]
 
-router = APIRouter(prefix="api/v1/students", tags=["Student"])
+router = APIRouter(prefix="/api/v1/students", tags=["Student"])
 
 # =======================
 # 1. 管理员添加学生 (Master写)
@@ -42,20 +41,7 @@ async def add_student(
     :return: 成功消息 {"msg": "Student created"}。
     """
     if settings.is_master():
-        # 本地直接写入 (Master)
-        try:
-            # 适配 init.sql: 包含 sex, age, current_campus
-            await conn.execute(
-                text('INSERT INTO student (id, name, sex, age, current_campus) VALUES (:id, :name, :sex, :age, :current_campus)'),
-                student.model_dump()
-            )
-
-            # db_id = (await conn.execute(text("SELECT @@server_id"))).scalar()
-            # print(f"\n实际上写入的数据库 Server ID 是: {db_id}\n")
-            
-        except Exception:
-            # 实际生产中应区分 IntegrityError
-            raise HTTPException(status_code=409, detail=err_user_exist)
+        return await master_router.create_student_private(conn, student)
     else:
         # 远程转发给 Master
         master_url = settings.campus_a_web_url
@@ -72,183 +58,119 @@ async def add_student(
     return {"msg": "Student created"}
 
 
-# todo 重复了
-# =======================
-# 2. 查询全校课程 (Shard读)
-# =======================
-@router.get("/courses", response_model=CourseQueryResp)
-async def list_courses(
-    user: StudentDep,
-    ms_conn: MasterSlaveConnDep,
+# ==========================================
+#  2. 管理员删除学生 (Master写 + 广播清理)
+# ==========================================
+@router.delete("/{student_id}", status_code=204)
+async def delete_student(
+    student_id: int, 
+    conn: MasterSlaveConnDep, 
     shard_conn: ShardConnDep,
-    campus: str = Query("A", description="校区: A/B/C"),
-    keyword: str | None = None,
-    only_not_full: bool = False,
-    only_selected: bool = False
+    user: AdminDep
 ):
     """
-    查询全校课程接口。
-    
-    支持按校区、关键词、容量、是否已选进行筛选。
-    逻辑：判断目标 campus 参数所指的校区地址。
-    - 如果是当前校区：直接调用 shard_router.query_courses 进行本地查询。
-    - 如果是其他校区：远程调用对应校区的私有接口。
-    
-    :param user: 当前登录学生 (StudentDep)。
-                 用于在开启 only_selected=True 时查询该学生是否已选。
-    :param ms_conn: 主从库连接。
-                 本地调用时传递给 shard_router，用于关联查询教师名称等主库信息。
-    :param shard_conn: 分片库连接。
-                 本地调用时传递给 shard_router，用于查询课程表。
-    :param campus: 目标校区 (A/B/C)。
-                 核心路由参数，决定了连接本地数据库还是进行远程转发。
-    :param keyword: 课程名称关键词过滤。
-    :param only_not_full: 是否只显示未满员的课程 (capacity > num_selected)。
-    :param only_selected: 是否只显示当前学生已选的课程。
-    :return: 课程列表数据 (CourseQueryResp)。
+    管理员删除学生。
+    逻辑：Master 删除档案，并通知所有分片库清理选课记录。
     """
-    target_url = settings.get_campus_web_url(campus)
-    
-    # === 本地调用 ===
-    if target_url is None:
-        # 直接调用 shard_router 中的函数，传入本地连接
-        return await shard_router.query_courses(
-            master_slave_conn=ms_conn,
-            shard_conn=shard_conn,
-            course=keyword,
-            teacher=None,
-            only_not_full=only_not_full,
-            only_selected=only_selected,
-            stu_id=user.user_id
-        )
-    
-    # === 远程调用 ===
+    if settings.is_master():
+        # 1. 本地 Master 删除档案
+        result = await conn.execute(text("DELETE FROM student WHERE id = :id"), {"id": student_id})
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail=err_student_not_exist)
+            
+        # 2. 广播清理所有分片库 (A, B, C) 的选课记录
+        for campus in ['A', 'B', 'C']:
+            target_url = settings.get_campus_web_url(campus)
+            
+            if target_url is None:
+                # 本地分片清理 (直接调用 shard_router 方法)
+                await shard_router.delete_user(shard_conn, student_id)
+            else:
+                # 远程分片清理 (调用 shard_router 的私有接口)
+                full_url = f"{target_url.rstrip('/')}/api-private/v1/users/{student_id}"
+                await remote_db_call(url=full_url, method="DELETE")
+                
     else:
-        full_url = f"{target_url.rstrip('/')}/api-private/v1/courses"
-        # 构造参数
-        params = {
-            "only_not_full": str(only_not_full).lower(),
-            "only_selected": str(only_selected).lower()
-        }
-        if keyword: params["course"] = keyword
-        # 如果只看已选，必须传 stu_id 给远程
-        if only_selected: params["stu_id"] = user.user_id 
+        # 远程转发给 Master (由 Master 负责删除和广播)
+        master_url = settings.campus_a_web_url
+        if not master_url:
+            raise HTTPException(status_code=500, detail="Master URL not configured")
         
-        status, result = await remote_db_call(url=full_url, params=params)
-        
-        if status != 200:
-             detail = result.get('detail') if isinstance(result, dict) else str(result)
-             raise HTTPException(status_code=status or 500, detail=detail)
-        return result
-
-
-# todo 重复了
-# =======================
-# 3. 抢课 (Shard写)
-# =======================
-@router.post("/courses/{course_id}/select", status_code=204)
-async def select_course(
-    course_id: int, 
-    user: StudentDep,
-    ms_conn: MasterSlaveConnDep,
-    shard_conn: ShardConnDep
-):
-    """
-    学生抢课接口。
-    
-    逻辑：根据 course_id 的前缀判断课程所属校区。
-    - 本地校区：直接调用 shard_router.select_course，执行悲观锁+事务写入。
-    - 远程校区：转发 HTTP POST 请求到对应分校区的私有接口。
-    
-    :param course_id: 课程ID (例如 100001)。
-                      前两位(10/11/12)标识了课程所在的校区(A/B/C)。
-    :param user: 当前操作学生 (StudentDep)。
-    :param ms_conn: 主从库连接。本地调用时用于校验学生是否存在。
-    :param shard_conn: 分片库连接。本地调用时用于执行选课事务。
-    :return: 204 No Content (成功)。
-    """
-    # 1. 解析课程ID确定校区
-    course_prefix = str(course_id)[:2]
-    campus_map = {'10': 'A', '11': 'B', '12': 'C'}
-    if course_prefix not in campus_map:
-        raise HTTPException(status_code=400, detail=err_course_id_invalid)
-    
-    target_campus = campus_map[course_prefix]
-    target_url = settings.get_campus_web_url(target_campus)
-
-    # === 本地调用 ===
-    if target_url is None:
-        # 注意：shard_router 必须处理 select_time 字段的写入 (例如使用 NOW())
-        await shard_router.select_course(
-            master_slave_conn=ms_conn,
-            shard_conn=shard_conn,
-            course_id=course_id,
-            stu_id=user.user_id
-        )
-        return
-
-    # === 远程调用 ===
-    else:
-        full_url = f"{target_url.rstrip('/')}/api-private/v1/courses/{course_id}/select"
-        # query param 传 stu_id
-        status, result = await remote_db_call(
-            url=full_url, 
-            method="POST", 
-            params={"stu_id": user.user_id}
-        )
+        target_url = f"{master_url.rstrip('/')}/api-private/v1/students/{student_id}"
+        status, result = await remote_db_call(url=target_url, method="DELETE")
         
         if status != 204:
             detail = result.get('detail') if isinstance(result, dict) else str(result)
             raise HTTPException(status_code=status or 500, detail=detail)
-        return
+    
+    return None
 
 
-# todo 重复了
-# =======================
-# 4. 退课 (Shard写)
-# =======================
-@router.post("/courses/{course_id}/drop", status_code=204)
-async def drop_course(
-    course_id: int, 
-    user: StudentDep,
-    ms_conn: MasterSlaveConnDep,
-    shard_conn: ShardConnDep
+# ==========================================
+#  3. 管理员修改学生 (Master写)
+# ==========================================
+@router.put("/{student_id}", status_code=204)
+async def update_student(
+    student_id: int, 
+    student: StudentUpdateParams, 
+    conn: MasterSlaveConnDep, 
+    user: AdminDep
 ):
     """
-    学生退课接口。
-    
-    逻辑与抢课类似，解析ID后进行本地事务删除或远程转发。
-    
-    :param course_id: 课程ID。
-    :param user: 当前操作学生。
-    :param ms_conn: 主从库连接。
-    :param shard_conn: 分片库连接。
-    :return: 204 No Content (成功)。
+    管理员修改学生信息。
     """
-    course_prefix = str(course_id)[:2]
-    campus_map = {'10': 'A', '11': 'B', '12': 'C'}
-    if course_prefix not in campus_map:
-        raise HTTPException(status_code=400, detail=err_course_id_invalid)
-    
-    target_campus = campus_map[course_prefix]
-    target_url = settings.get_campus_web_url(target_campus)
-
-    if target_url is None:
-        await shard_router.deselect_course(
-            master_slave_conn=ms_conn,
-            shard_conn=shard_conn,
-            course_id=course_id,
-            stu_id=user.user_id
-        )
-        return
+    if settings.is_master():
+        await master_router.update_student_private(conn, student_id, student)
     else:
-        full_url = f"{target_url.rstrip('/')}/api-private/v1/courses/{course_id}/deselect"
-        status, result = await remote_db_call(
-            url=full_url, 
-            method="POST", 
-            params={"stu_id": user.user_id}
-        )
+        # 远程转发
+        master_url = settings.campus_a_web_url
+        if not master_url:
+            raise HTTPException(status_code=500, detail="Master URL not configured")
+        
+        target_url = f"{master_url.rstrip('/')}/api-private/v1/students/{student_id}"
+        status, result = await remote_db_call(url=target_url, method="PUT", json=student.model_dump(exclude_unset=True))
+        
         if status != 204:
             detail = result.get('detail') if isinstance(result, dict) else str(result)
             raise HTTPException(status_code=status or 500, detail=detail)
-        return
+            
+    return None
+
+
+# ==========================================
+#  4. 管理员查询学生 (ID查名字 或 名字查ID)
+# ==========================================
+@router.get("/search", response_model=List[StudentSimpleResp])
+async def search_student(
+    conn: MasterSlaveConnDep, 
+    user: AdminDep,
+    id: int | None = None,
+    name: str | None = None
+):
+    """
+    查询学生信息 (只返回 ID 和 姓名)。
+    - 如果提供 id：查对应的名字。
+    - 如果提供 name：查对应的 ID (可能多个)。
+    - 如果都不提供：返回空列表。
+    逻辑：直接读取本地数据库 (student表已同步)。
+    """
+    if id is None and name is None:
+        return []
+
+    sql = "SELECT id, name FROM student WHERE 1=1"
+    params = {}
+
+    if id is not None:
+        sql += " AND id = :id"
+        params["id"] = id
+    
+    if name is not None:
+        sql += " AND name LIKE :name"
+        params["name"] = f"%{name}%" # 支持模糊搜索
+
+    # 限制返回数量防止爆炸
+    sql += " LIMIT 20"
+
+    rows = (await conn.execute(text(sql), params)).all()
+    
+    return [StudentSimpleResp(id=row.id, name=row.name) for row in rows]

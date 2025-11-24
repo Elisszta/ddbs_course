@@ -71,9 +71,9 @@ async def mock_teacher():
 
 # 4. 启用覆盖！
 # 注意：这里的中括号里必须填函数名，不能填 StudentDep/AdminDep
-# app.dependency_overrides[get_current_admin] = mock_admin
+app.dependency_overrides[get_current_admin] = mock_admin
 # app.dependency_overrides[get_current_student] = mock_student
-app.dependency_overrides[get_current_admin_or_teacher] = mock_teacher
+# app.dependency_overrides[get_current_admin_or_teacher] = mock_teacher
 # app.dependency_overrides[get_current_user] = mock_student # 通用兜底
 
 print("\n测试模式已启动：身份验证被 Mock 覆盖\n")
