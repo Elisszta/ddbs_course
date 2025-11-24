@@ -16,3 +16,21 @@ mysql_data/
 .env
 .env.local
 .env.*.local
+
+# OpenAPI, just for testing
+openapi.json
+
+# Front-end
+node_modules/
+.pnpm-store/
+dist/
+dist-ssr/
+build/
+out/
+coverage/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.eslintcache
+*.tsbuildinfo
