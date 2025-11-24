@@ -112,7 +112,7 @@ async def list_courses(
     # === 本地调用 ===
     if target_url is None:
         # 直接调用 shard_router 中的函数，传入本地连接
-        return await shard_router.query_courses(
+        return await shard_router.query_courses_private(
             master_slave_conn=ms_conn,
             shard_conn=shard_conn,
             course=keyword,
@@ -179,7 +179,7 @@ async def select_course(
     # === 本地调用 ===
     if target_url is None:
         # 注意：shard_router 必须处理 select_time 字段的写入 (例如使用 NOW())
-        await shard_router.select_course(
+        await shard_router.select_course_private(
             master_slave_conn=ms_conn,
             shard_conn=shard_conn,
             course_id=course_id,
@@ -234,7 +234,7 @@ async def drop_course(
     target_url = settings.get_campus_web_url(target_campus)
 
     if target_url is None:
-        await shard_router.deselect_course(
+        await shard_router.deselect_course_private(
             master_slave_conn=ms_conn,
             shard_conn=shard_conn,
             course_id=course_id,

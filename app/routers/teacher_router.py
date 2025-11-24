@@ -115,7 +115,7 @@ async def add_course(
     # Case A: 本地调用 (目标校区 = 当前校区)
     if target_url is None:
         # 直接复用 shard_router 的逻辑，它包含了完整的事务处理和 ID 生成
-        return await shard_router.create_course(
+        return await shard_router.create_course_private(
             master_slave_conn=conn_ms,
             shard_conn=conn_shard,
             p=course
@@ -179,7 +179,7 @@ async def get_course_students(
     
     # Case A: 本地调用
     if target_url is None:
-        return await shard_router.get_course_students(
+        return await shard_router.get_course_students_private(
             master_slave_conn=ms_conn,
             shard_conn=shard_conn,
             course_id=course_id
