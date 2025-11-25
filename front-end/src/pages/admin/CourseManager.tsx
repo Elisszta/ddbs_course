@@ -139,8 +139,21 @@ export const CourseManager = () => {
       fetchCourses();
     } catch (error: any) {
       // 提取错误信息
-      const errorMsg = error.body?.detail?.msg || error.body?.detail || '添加失败';
-      message.error(errorMsg);
+      const detail = error.body?.detail?.msg || error.body?.detail;
+      
+      if (error.status === 409) {
+        if (detail === 'Course capacity conflict') {
+           message.error('添加失败：课程已满');
+        } else if (detail === 'You have already selected the course') {
+           message.error('添加失败：该学生已选修此课程');
+        } else {
+           message.error(detail || '冲突错误');
+        }
+      } else if (error.status === 404) {
+        message.error('添加失败：学生不存在或课程不存在');
+      } else {
+        message.error(detail || '添加失败');
+      }
     } finally {
       setDrawerLoading(false);
     }
