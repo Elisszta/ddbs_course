@@ -23,10 +23,10 @@ export const Login = () => {
       <Card title="分布式抢课系统登录" style={{ width: 400 }}>
         <Form onFinish={onFinish} layout="vertical">
           <Form.Item label="用户ID" name="user_id" rules={[{ required: true }]}>
-            <Input placeholder="请输入学号/工号 (如 1120250001)" />
+            <Input placeholder="请输入学号/工号" />
           </Form.Item>
           <Form.Item label="密码" name="password" rules={[{ required: true }]}>
-            <Input.Password placeholder="默认密码可能与ID相同" />
+            <Input.Password placeholder="" />
           </Form.Item>
           <Button type="primary" htmlType="submit" block>登录</Button>
         </Form>

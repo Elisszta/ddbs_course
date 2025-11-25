@@ -146,7 +146,7 @@ export const TeacherManager = () => {
     { title: '性别', dataIndex: 'sex', key: 'sex', width: 80 },
     { title: '年龄', dataIndex: 'age', width: 80 },
     {
-      title: '操作',
+      title: '',
       align: 'right',
       render: (_: any, record: TeacherResp) => (
         <Space>

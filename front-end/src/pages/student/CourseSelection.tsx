@@ -115,7 +115,7 @@ export const CourseSelection = () => {
   };
 
   const columns = [
-    { title: 'ID', dataIndex: 'course_id', width: 80 },
+    { title: 'ID', dataIndex: 'course_id', width: 120 },
     { title: '课程名称', dataIndex: 'name' },
     { 
       title: '校区', 

@@ -103,7 +103,7 @@ export const BatchManager: React.FC = () => {
       }
     },
     {
-      title: '操作',
+      title: '',
       align: 'right' as const,
       render: (_: any, record: SelectionBatchResp) => (
         <Popconfirm 
@@ -113,7 +113,7 @@ export const BatchManager: React.FC = () => {
           okText="删除"
           cancelText="取消"
         >
-          <Button danger icon={<DeleteOutlined />} size="small">删除</Button>
+          <Button danger type="link" icon={<DeleteOutlined />}>删除</Button>
         </Popconfirm>
       )
     }
