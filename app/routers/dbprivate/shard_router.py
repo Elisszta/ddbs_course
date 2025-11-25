@@ -181,8 +181,6 @@ async def query_courses_private(
         try: teacher = int(teacher)
         except: pass
     # 大量利用if None不执行的特性
-    print(f'only_selected: {only_selected}, stu_id: {stu_id}')
-
     if only_selected and stu_id is None:
         raise HTTPException(status_code=422, detail='"stu_id" is required when "only_selected" is True')
     # 使用半连接策略，但主从复制库用临时表的后果不可预知，因此使用IN语句伪半连接
@@ -210,17 +208,16 @@ async def query_courses_private(
     result = await master_slave_conn.execute(text(f"SELECT id, name FROM teacher WHERE id IN ({','.join([str(teacher_id) for teacher_id in distinct_teachers_id])})"))
     await shard_conn.execute(text('INSERT INTO tmp_tid_name (tid, name) VALUES (:tid, :name)'), [{'tid': row[0], 'name': row[1]} for row in result.all()])
     if stu_id is None:
-        # todo group concat什么毛病
-        result = await shard_conn.execute(text("SELECT c.id, GROUP_CONCAT(tmp.name, ',') AS teachers, c.name, c.capacity, c.num_selected, c.campus FROM course c "
+        result = await shard_conn.execute(text("SELECT c.id, GROUP_CONCAT(tmp.name SEPARATOR ',') AS teachers, c.name, c.capacity, c.num_selected, c.campus FROM course c "
                                                f'JOIN {table_name} t ON c.id = t.cid '
                                                'JOIN tmp_tid_name tmp ON t.tid = tmp.tid '
                                                'GROUP BY c.id'))
         resp_result = [CourseResp(course_id=row[0], teachers=row[1], name=row[2], capacity=row[3], num_selected=row[4], campus=row[5]) for row in result.all()]
     else:
-        result = await shard_conn.execute(text("SELECT c.id, GROUP_CONCAT(tmp.name, ',') AS teachers, c.name, c.capacity, c.num_selected, c.campus, CASE "
+        result = await shard_conn.execute(text("SELECT c.id, GROUP_CONCAT(tmp.name SEPARATOR ',') AS teachers, c.name, c.capacity, c.num_selected, c.campus, CASE "
                                                    'WHEN l.sid IS NULL THEN false '
-                                                   'ELSE true AS is_selected '
-                                               'FROM course c '
+                                                   'ELSE true '
+                                               'END AS is_selected FROM course c '
                                                f'JOIN {table_name} t ON c.id = t.cid '
                                                'JOIN tmp_tid_name tmp ON t.tid = tmp.tid '
                                                'LEFT JOIN learn l ON l.sid = :sid AND c.id = l.cid '
@@ -278,8 +275,8 @@ async def create_course_private(master_slave_conn: MasterSlaveConnDep, shard_con
         raise HTTPException(status_code=404, detail=err_teacher_not_exist)
 
     ##### DEBUG:Check DB Info #####
-    db_info = (await shard_conn.execute(text("SELECT @@server_id, @@hostname"))).fetchone()
-    print(f"\nShard Write] 正在写入分片库 | Server ID: {db_info[0]} | Hostname: {db_info[1]}\n")
+    # db_info = (await shard_conn.execute(text("SELECT @@server_id, @@hostname"))).fetchone()
+    # print(f"\nShard Write] 正在写入分片库 | Server ID: {db_info[0]} | Hostname: {db_info[1]}\n")
 
     # 生成id
     # 无锁，如果真的有并发插入导致id重了，那就返回409让用户重试呗
@@ -329,5 +326,5 @@ async def update_course_private(master_slave_conn: MasterSlaveConnDep, shard_con
     if p.capacity < num_selected:
         raise HTTPException(status_code=409, detail=err_course_cap_conflict)
     await shard_conn.execute(text('UPDATE course SET name = :name, capacity = :capacity WHERE id = :id'), {'name': p.name, 'capacity': p.capacity, 'id': course_id})
-    await shard_conn.execute(text('DELETE FROM teach WHERE id = :id'), {'id': course_id})
+    await shard_conn.execute(text('DELETE FROM teach WHERE cid = :cid'), {'cid': course_id})
     await shard_conn.execute(text('INSERT INTO teach(tid, cid) VALUES (:tid, :cid)'), [{'tid': teacher_id, 'cid': course_id} for teacher_id in p.teacher_ids])
