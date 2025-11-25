@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal, Self
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, model_validator, Field
 
 
 class SelectionBatchResp(BaseModel):
@@ -18,7 +18,7 @@ class SelectionBatchQueryResp(BaseModel):
 
 
 class SelectionBatchCreateParams(BaseModel):
-    name: str
+    name: str = Field(min_length=2, max_length=255)
     begin_time: datetime
     end_time: datetime
 

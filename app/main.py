@@ -8,14 +8,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from app.models.generic_error import err_invalid_uid, GenericError
-from app.models.user_model import UserLoginParams, UserLoginResp
+from app.models.user_login_model import CurUser, UserLoginParams, UserLoginResp
 from app.routers import course_router, student_router, teacher_router, selection_batch_router
 from app.routers.dbprivate import shard_router, master_router
 from app.utils.classify_helper import get_user_role
 from app.utils.database import db, get_master_slave_connection
 from app.settings import settings
 from app.utils.auth import get_current_student, get_current_admin_or_teacher, get_current_admin, UserDep, AdminDep, StudentDep
-from app.models.user_model import CurUser
 
 
 @asynccontextmanager
@@ -53,7 +52,7 @@ async def login(master_slave_conn: Annotated[AsyncConnection, Depends(get_master
 # FOR TESTING
 # ================
 
-from app.models.user_model import CurUser
+from app.models.user_login_model import CurUser
 from app.utils.auth import get_current_student, get_current_admin, get_current_user, get_current_admin_or_teacher
 
 # 1. 伪造一个“全能管理员”

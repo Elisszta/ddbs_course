@@ -1,4 +1,5 @@
-from typing import Annotated, List
+import asyncio
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
@@ -6,8 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from starlette.responses import JSONResponse
 
 from app.models.generic_error import GenericError
-from app.models.user_model import TeacherCreateParams, TeacherUpdateParams, TeacherResp, TeacherQueryResp
-from app.routers.dbprivate import shard_router, master_router
+from app.models.teacher_model import TeacherCreateParams, TeacherUpdateParams, TeacherResp, TeacherQueryResp
+from app.routers.dbprivate import master_router
+from app.routers.dbprivate.shard_router import delete_user_private
 from app.settings import settings
 from app.utils.auth import AdminDep
 from app.utils.database import get_master_slave_connection, get_shard_connection
@@ -84,36 +86,40 @@ async def delete_teacher(
     1. Master: 删除 teacher 表中的档案。
     2. Master: 广播通知所有校区清理该教师的任课记录 (teach 表)。
     """
+    # 分两步走，先清主从库再清分片库。如果同时进行且主库失败而分库成功，数据就不一致了
     if settings.is_master():
-        # 1. 本地 Master 删除档案
         await master_router.delete_teacher_private(conn, teacher_id)
-            
-        # 2. 广播清理所有分片库 (A, B, C) 的任课记录
-        for campus in ['A', 'B', 'C']:
-            target_url = settings.get_campus_web_url(campus)
-            
-            if target_url is None:
-                # 本地分片清理 (调用 shard_router.delete_user，它也适用于 teacher)
-                await shard_router.delete_user(shard_conn, teacher_id)
-            else:
-                # 远程分片清理
-                full_url = f"{target_url.rstrip('/')}/api-private/v1/users/{teacher_id}"
-                await remote_db_call(url=full_url, method="DELETE")
-                
     else:
         # 远程转发给 Master
         master_url = settings.campus_a_web_url
         if not master_url:
             raise HTTPException(status_code=500, detail="Master URL not configured")
-        
         target_url = f"{master_url.rstrip('/')}/api-private/v1/teachers/{teacher_id}"
         status, result = await remote_db_call(url=target_url, method="DELETE")
-        
         if status != 204:
             detail = result.get('detail') if isinstance(result, dict) else str(result)
-            raise HTTPException(status_code=status or 500, detail=detail)
-    
-    return None
+            raise HTTPException(status_code=status or 502, detail=detail)
+
+    # 2. 广播清理所有分片库 (A, B, C) 的任课记录
+    tasks = []
+    for campus in ['A', 'B', 'C']:
+        target_url = settings.get_campus_web_url(campus)
+        if target_url is None:
+            # 本地分片清理 (调用 delete_user_private，它也适用于 teacher)
+            tasks.append(delete_user_private(shard_conn, teacher_id))
+        else:
+            # 远程分片清理
+            full_url = f"{target_url.rstrip('/')}/api-private/v1/users/{teacher_id}"
+            tasks.append(remote_db_call(url=full_url, method="DELETE"))
+    # 总之无论发生了什么，都不能抛异常
+    for task_result in await asyncio.gather(*tasks, return_exceptions=True):
+        if isinstance(task_result, Exception):
+            print(f"Delete user task failed: {task_result}")
+        elif task_result is not None:
+            code, resp = task_result
+            if code != 204:
+                detail = resp.get('detail') if isinstance(resp, dict) else str(resp)
+                print(f"Delete user task failed: {code or 502}: {detail}")
 
 
 # =================================================================
@@ -134,7 +140,8 @@ async def update_teacher(
     """
     if settings.is_master():
         # 本地调用
-        return await master_router.update_teacher_private(conn, teacher_id, teacher)
+        await master_router.update_teacher_private(conn, teacher_id, teacher)
+        return
     # 远程转发
     master_url = settings.campus_a_web_url
     if not master_url:
@@ -146,8 +153,6 @@ async def update_teacher(
     if status != 204:
         detail = result.get('detail') if isinstance(result, dict) else str(result)
         raise HTTPException(status_code=status or 502, detail=detail)
-            
-    return None
 
 
 # =================================================================
@@ -163,9 +168,6 @@ async def search_teacher(
     """
     简单查询教师 (用于前端下拉框等)。
     """
-    if id is None and name is None:
-        return TeacherQueryResp(total=0, result=[])
-
     sql = "SELECT id, name, sex, age FROM teacher WHERE 1=1"
     params = {}
 

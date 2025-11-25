@@ -8,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from app.models.generic_error import GenericError, err_student_not_exist, err_teacher_not_exist, err_teacher_id_full, \
     err_student_id_conflict, err_student_id_full, err_teacher_id_conflict
 from app.models.selection_batch_model import SelectionBatchCreateParams, SelectionBatchResp
-from app.models.user_model import StudentCreateParams, TeacherCreateParams, StudentUpdateParams, TeacherUpdateParams, \
-    TeacherResp, StudentResp
+from app.models.student_model import StudentCreateParams, StudentUpdateParams, StudentResp
+from app.models.teacher_model import TeacherCreateParams, TeacherUpdateParams, TeacherResp
 from app.utils.auth import verify_db_api
 from app.utils.database import get_master_slave_connection
 

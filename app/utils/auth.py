@@ -5,7 +5,7 @@ from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.models.generic_error import err_no_permission, err_invalid_token, err_expired_token, err_invalid_uid
-from app.models.user_model import CurUser
+from app.models.user_login_model import CurUser
 from app.utils.classify_helper import get_user_role
 from app.settings import settings
 
@@ -36,7 +36,7 @@ async def get_current_user(credentials: CredDep) -> CurUser:
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=403, detail=err_invalid_token)
     uid = payload.get('uid')
-    if uid is None or type(uid) != int:
+    if type(uid) != int:
         raise HTTPException(status_code=403, detail=err_invalid_token)
     if uid < 1000000000 or uid >= 1400000000:
         raise HTTPException(status_code=403, detail=err_invalid_uid)

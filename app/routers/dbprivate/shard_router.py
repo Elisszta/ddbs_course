@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -9,7 +10,7 @@ from app.models.course_model import CourseCreateParams, CourseUpdateParams, Cour
 from app.models.generic_error import GenericError, err_course_cap_conflict, err_course_not_exist, \
     err_course_id_conflict, err_course_id_full, err_teacher_not_exist, err_student_not_exist, err_no_permission, \
     err_course_already_selected
-from app.models.user_model import StudentQueryResp, StudentResp
+from app.models.student_model import StudentQueryResp, StudentResp
 from app.utils.auth import verify_db_api
 from app.utils.classify_helper import get_user_role
 from app.utils.database import get_master_slave_connection, get_shard_connection
@@ -71,7 +72,7 @@ async def select_course_private(master_slave_conn: MasterSlaveConnDep, shard_con
     if row[0] >= row[1]:
         raise HTTPException(status_code=409, detail=err_course_cap_conflict)    # 课程已满
     try:
-        await shard_conn.execute(text('INSERT INTO learn(cid, sid) VALUES (:cid, :sid)'), {'cid': course_id, 'sid': stu_id})
+        await shard_conn.execute(text('INSERT INTO learn(cid, sid, select_time) VALUES (:cid, :sid, :time)'), {'cid': course_id, 'sid': stu_id, 'time': datetime.now()})
     except IntegrityError:
         raise HTTPException(status_code=409, detail=err_course_already_selected) # （插入失败）已经选了
     await shard_conn.execute(text('UPDATE course SET num_selected = :num WHERE id = :id'), {'num': row[0]+1, 'id': course_id})
@@ -92,7 +93,7 @@ async def deselect_course_private(master_slave_conn: MasterSlaveConnDep, shard_c
     num_selected = (await shard_conn.execute(text('SELECT num_selected FROM course WHERE id = :id FOR UPDATE'), {'id': course_id})).scalar() # 行锁
     if num_selected is None:
         raise HTTPException(status_code=404, detail=err_course_not_exist)  # 课程不存在
-    if (await shard_conn.execute(text('DELETE FROM learn WHERE cid = :cid AND sid = :sid'), {'cid': course_id, 'sid': stu_id})).rowcount() > 0:
+    if (await shard_conn.execute(text('DELETE FROM learn WHERE cid = :cid AND sid = :sid'), {'cid': course_id, 'sid': stu_id})).rowcount > 0:
         await shard_conn.execute(text('UPDATE course SET num_selected = :num WHERE id = :id'), {'num': num_selected-1, 'id': course_id})    # 只在确实选了课时修改已选人数
 
 
@@ -125,17 +126,17 @@ async def build_course_filter_sql(
     params = {}
     join_part: list[str] = []
     where_part: list[str] = []
-    if type(course) is int:
+    if type(course) == int:
         where_part.append('c.id = :cid')
         params['cid'] = course
-    elif type(course) is str:
-        where_part.append("c.name LIKE CONCAT('%', :name, '%')")
-        params['name'] = course
-    if type(teacher) is int:
+    elif type(course) == str:
+        where_part.append("c.name LIKE :name")
+        params['name'] = f'%{course}%'
+    if type(teacher) == int:
         join_part.append('JOIN teach t ON c.id = t.cid')
         where_part.append('t.tid = :tid')
         params['tid'] = teacher
-    elif type(teacher) is str:
+    elif type(teacher) == str:
         teacher_ids = (await master_slave_conn.execute(text('SELECT id FROM teacher WHERE name = :name'), {'name': teacher})).scalars().all()
         if len(teacher_ids) == 0:
             # 没有符合条件的教师，没有必要进行后续的查询了
@@ -172,7 +173,16 @@ async def query_courses_private(
     :param stu_id: 学生id或空。若提供学生id，查询结果中将包括该学生是否已选的信息
     :return: 课程查询结果
     """
+    # 傻逼fastapi，怎么参数 int | str 永远返回str
+    if type(course) == str:
+        try: course = int(course)
+        except: pass
+    if type(teacher) == str:
+        try: teacher = int(teacher)
+        except: pass
     # 大量利用if None不执行的特性
+    print(f'only_selected: {only_selected}, stu_id: {stu_id}')
+
     if only_selected and stu_id is None:
         raise HTTPException(status_code=422, detail='"stu_id" is required when "only_selected" is True')
     # 使用半连接策略，但主从复制库用临时表的后果不可预知，因此使用IN语句伪半连接
@@ -183,25 +193,31 @@ async def query_courses_private(
         table_name = 'teach'
     else:
         # 有条件的查询
-        join_sql, where_sql, params = build_course_filter_sql(master_slave_conn, course, teacher, only_not_full, only_selected, stu_id)
+        join_sql, where_sql, params = await build_course_filter_sql(master_slave_conn, course, teacher, only_not_full, only_selected, stu_id)
         if join_sql is None:
+            await shard_conn.execute(text('DROP TABLE tmp_tid_name'))   # clean up
             return CourseQueryResp(total=0, result=[])
         await shard_conn.execute(text('CREATE TEMPORARY TABLE tmp_cid_tid (cid INT NOT NULL, tid INT NOT NULL, INDEX idx_cid (cid), INDEX idx_tid (tid))'))
-        await shard_conn.execute(text(f'INSERT INTO tmp_cid_tid SELECT tmp.id, t.tid FROM (course c {join_sql} WHERE {where_sql}) tmp JOIN teach t ON tmp.id = t.cid'), params)
+        await shard_conn.execute(text(f'INSERT INTO tmp_cid_tid (cid, tid) SELECT tmp.id, t.tid FROM (SELECT c.id FROM course c {join_sql} WHERE {where_sql}) tmp JOIN teach t ON tmp.id = t.cid'), params)
         distinct_teachers_id = (await shard_conn.execute(text('SELECT DISTINCT tid FROM tmp_cid_tid'))).scalars().all()
         table_name = 'tmp_cid_tid'
     if len(distinct_teachers_id) == 0:
+        # clean up
+        await shard_conn.execute(text('DROP TABLE tmp_tid_name'))
+        if table_name == 'tmp_cid_tid':
+            await shard_conn.execute(text('DROP TABLE tmp_cid_tid'))
         return CourseQueryResp(total=0, result=[])  # 没有课程记录，快速返回
     result = await master_slave_conn.execute(text(f"SELECT id, name FROM teacher WHERE id IN ({','.join([str(teacher_id) for teacher_id in distinct_teachers_id])})"))
     await shard_conn.execute(text('INSERT INTO tmp_tid_name (tid, name) VALUES (:tid, :name)'), [{'tid': row[0], 'name': row[1]} for row in result.all()])
     if stu_id is None:
-        result = await shard_conn.execute(text("SELECT c.id, GROUP_CONCAT(tmp.name, ', ') AS teachers, c.name, c.capacity, c.num_selected, c.campus FROM course c "
+        # todo group concat什么毛病
+        result = await shard_conn.execute(text("SELECT c.id, GROUP_CONCAT(tmp.name, ',') AS teachers, c.name, c.capacity, c.num_selected, c.campus FROM course c "
                                                f'JOIN {table_name} t ON c.id = t.cid '
                                                'JOIN tmp_tid_name tmp ON t.tid = tmp.tid '
                                                'GROUP BY c.id'))
         resp_result = [CourseResp(course_id=row[0], teachers=row[1], name=row[2], capacity=row[3], num_selected=row[4], campus=row[5]) for row in result.all()]
     else:
-        result = await shard_conn.execute(text("SELECT c.id, GROUP_CONCAT(tmp.name, ', ') AS teachers, c.name, c.capacity, c.num_selected, c.campus, CASE "
+        result = await shard_conn.execute(text("SELECT c.id, GROUP_CONCAT(tmp.name, ',') AS teachers, c.name, c.capacity, c.num_selected, c.campus, CASE "
                                                    'WHEN l.sid IS NULL THEN false '
                                                    'ELSE true AS is_selected '
                                                'FROM course c '
@@ -210,6 +226,10 @@ async def query_courses_private(
                                                'LEFT JOIN learn l ON l.sid = :sid AND c.id = l.cid '
                                                'GROUP BY c.id'), {'sid': stu_id})
         resp_result = [CourseResp(course_id=row[0], teachers=row[1], name=row[2], capacity=row[3], num_selected=row[4], campus=row[5], is_selected=row[6]) for row in result.all()]
+    # clean up
+    await shard_conn.execute(text('DROP TABLE tmp_tid_name'))
+    if table_name == 'tmp_cid_tid':
+        await shard_conn.execute(text('DROP TABLE tmp_cid_tid'))
     return CourseQueryResp(total=len(resp_result), result=resp_result)
     # await shard_conn.execute(text(
     #     'INSERT INTO temp_result '

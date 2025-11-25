@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 class CourseUpdateParams(BaseModel):
     name: str = Field(min_length=2, max_length=255)
     capacity: int = Field(gt=0)
-    teacher_ids: list[int] = Field(min_length=1)
+    teacher_ids: set[int] = Field(min_length=1)
 
 
 class CourseCreateParams(CourseUpdateParams):

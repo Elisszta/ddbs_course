@@ -1,3 +1,4 @@
+import asyncio
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -6,8 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from starlette.responses import JSONResponse
 
 from app.models.generic_error import GenericError
-from app.models.user_model import StudentCreateParams, StudentUpdateParams, StudentResp, StudentQueryResp
-from app.routers.dbprivate import shard_router, master_router
+from app.models.student_model import StudentCreateParams, StudentUpdateParams, StudentResp, StudentQueryResp
+from app.routers.dbprivate import master_router
+from app.routers.dbprivate.shard_router import delete_user_private
 from app.settings import settings
 from app.utils.auth import AdminDep
 from app.utils.database import get_master_slave_connection, get_shard_connection
@@ -70,7 +72,7 @@ async def add_student(
     502: {'model': GenericError, 'description': 'Remote not responding'}
 })
 async def delete_student(
-    student_id: int, 
+    student_id: int,
     conn: MasterSlaveConnDep, 
     shard_conn: ShardConnDep,
     user: AdminDep
@@ -79,36 +81,40 @@ async def delete_student(
     管理员删除学生。
     逻辑：Master 删除档案，并通知所有分片库清理选课记录。
     """
+    # 分两步走，先清主从库再清分片库。如果同时进行且主库失败而分库成功，数据就不一致了
     if settings.is_master():
-        # 1. 本地 Master 删除档案
         await master_router.delete_student_private(conn, student_id)
-            
-        # 2. 广播清理所有分片库 (A, B, C) 的选课记录
-        for campus in ['A', 'B', 'C']:
-            target_url = settings.get_campus_web_url(campus)
-            
-            if target_url is None:
-                # 本地分片清理 (直接调用 shard_router 方法)
-                await shard_router.delete_user(shard_conn, student_id)
-            else:
-                # 远程分片清理 (调用 shard_router 的私有接口)
-                full_url = f"{target_url.rstrip('/')}/api-private/v1/users/{student_id}"
-                await remote_db_call(url=full_url, method="DELETE")
-                
     else:
-        # 远程转发给 Master (由 Master 负责删除和广播)
+        # 远程转发给 Master
         master_url = settings.campus_a_web_url
         if not master_url:
             raise HTTPException(status_code=500, detail="Master URL not configured")
-        
         target_url = f"{master_url.rstrip('/')}/api-private/v1/students/{student_id}"
         status, result = await remote_db_call(url=target_url, method="DELETE")
-        
         if status != 204:
             detail = result.get('detail') if isinstance(result, dict) else str(result)
-            raise HTTPException(status_code=status or 500, detail=detail)
-    
-    return None
+            raise HTTPException(status_code=status or 502, detail=detail)
+
+    # 2. 广播清理所有分片库 (A, B, C) 的任课记录
+    tasks = []
+    for campus in ['A', 'B', 'C']:
+        target_url = settings.get_campus_web_url(campus)
+        if target_url is None:
+            # 本地分片清理 (调用 delete_user_private)
+            tasks.append(delete_user_private(shard_conn, student_id))
+        else:
+            # 远程分片清理
+            full_url = f"{target_url.rstrip('/')}/api-private/v1/users/{student_id}"
+            tasks.append(remote_db_call(url=full_url, method="DELETE"))
+    # 总之无论发生了什么，都不能抛异常
+    for task_result in await asyncio.gather(*tasks, return_exceptions=True):
+        if isinstance(task_result, Exception):
+            print(f"Delete user task failed: {task_result}")
+        elif task_result is not None:
+            code, resp = task_result
+            if code != 204:
+                detail = resp.get('detail') if isinstance(resp, dict) else str(resp)
+                print(f"Delete user task failed: {code or 502}: {detail}")
 
 
 # ==========================================
@@ -119,7 +125,7 @@ async def delete_student(
     502: {'model': GenericError, 'description': 'Remote not responding'}
 })
 async def update_student(
-    student_id: int, 
+    student_id: int,
     student: StudentUpdateParams, 
     conn: MasterSlaveConnDep, 
     user: AdminDep
@@ -128,7 +134,8 @@ async def update_student(
     管理员修改学生信息。
     """
     if settings.is_master():
-        return await master_router.update_student_private(conn, student_id, student)
+        await master_router.update_student_private(conn, student_id, student)
+        return
 
     # 远程转发
     master_url = settings.campus_a_web_url
@@ -141,9 +148,6 @@ async def update_student(
     if status != 204:
         detail = result.get('detail') if isinstance(result, dict) else str(result)
         raise HTTPException(status_code=status or 502, detail=detail)
-
-    return None
-
 
 
 # ==========================================
@@ -163,9 +167,6 @@ async def search_student(
     - 如果都不提供：返回空列表。
     逻辑：直接读取本地数据库 (student表已同步)。
     """
-    if id is None and name is None:
-        return StudentQueryResp(total=0, result=[])
-
     sql = "SELECT id, name, sex, age, current_campus FROM student WHERE 1=1"
     params = {}
 
@@ -181,5 +182,5 @@ async def search_student(
     # sql += " LIMIT 20"
 
     rows = (await conn.execute(text(sql), params)).all()
-    resp_result = [StudentResp(stu_id=row.id, name=row.name, sex=row.sex, age=row.age, current_campus=row.current_cmapus) for row in rows]
+    resp_result = [StudentResp(stu_id=row.id, name=row.name, sex=row.sex, age=row.age, current_campus=row.current_campus) for row in rows]
     return StudentQueryResp(total=len(rows), result=resp_result)

@@ -1,5 +1,7 @@
 from typing import Literal
 
+from app.settings import settings
+
 
 def get_course_campus(course_id: int) -> Literal['A', 'B', 'C']:
     course_campus = course_id // 100000
@@ -7,7 +9,9 @@ def get_course_campus(course_id: int) -> Literal['A', 'B', 'C']:
         return 'A'
     if course_campus == 11:
         return 'B'
-    return 'C'
+    if course_campus == 12:
+        return 'C'
+    return settings.current_campus()
 
 
 def get_user_role(user_id: int) -> Literal['admin', 'student', 'teacher']:
