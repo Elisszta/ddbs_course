@@ -30,7 +30,6 @@ export const AppLayout: React.FC = () => {
     } else if (role === 'student') {
       items.push(
         { key: '/student/courses', icon: <BookOutlined />, label: '选课中心' },
-        { key: '/student/my-courses', icon: <UserOutlined />, label: '我的课表' }
       );
     } else if (role === 'teacher') {
       items.push(

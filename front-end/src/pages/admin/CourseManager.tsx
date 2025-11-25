@@ -268,7 +268,7 @@ export const CourseManager = () => {
     { title: '授课教师', dataIndex: 'teachers', ellipsis: true },
     {
       title: '',
-      width: 220,
+      width: 260,
       align: 'right' as const,
       render: (_: any, record: CourseResp) => (
         <Space>

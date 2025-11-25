@@ -8,6 +8,7 @@ import { TeacherManager } from './pages/admin/TeacherManager';
 import { CourseManager } from './pages/admin/CourseManager';
 import { CourseSelection } from './pages/student/CourseSelection';
 import { BatchManager } from './pages/admin/BatchManager';
+import { MyCourses } from './pages/teacher/MyCourses';
 
 // 路由保护组件：没登录就踢回 Login 页
 const ProtectedRoute = ({ children }: { children: ReactNode }) => {
@@ -40,6 +41,9 @@ function App() {
 
             {/* === 学生路由 === */}
             <Route path="student/courses" element={<CourseSelection />} />
+
+            {/* === 教师路由 === */}
+            <Route path="teacher/courses" element={<MyCourses />} />
             
             {/* 404 路由 */}
             <Route path="*" element={<div style={{ padding: 20 }}>页面不存在</div>} />
