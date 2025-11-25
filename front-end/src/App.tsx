@@ -7,6 +7,7 @@ import { StudentManager } from './pages/admin/StudentManager';
 import { TeacherManager } from './pages/admin/TeacherManager';
 import { CourseManager } from './pages/admin/CourseManager';
 import { CourseSelection } from './pages/student/CourseSelection';
+import { BatchManager } from './pages/admin/BatchManager';
 
 // 路由保护组件：没登录就踢回 Login 页
 const ProtectedRoute = ({ children }: { children: ReactNode }) => {
@@ -35,7 +36,8 @@ function App() {
             <Route path="admin/students" element={<StudentManager />} />
             <Route path="admin/teachers" element={<TeacherManager />} />
             <Route path="admin/courses" element={<CourseManager />} />
-            
+            <Route path="admin/selection-batches" element={<BatchManager />} />
+
             {/* === 学生路由 === */}
             <Route path="student/courses" element={<CourseSelection />} />
             

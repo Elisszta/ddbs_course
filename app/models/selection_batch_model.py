@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal, Self
 
 from pydantic import BaseModel, model_validator, Field
@@ -24,7 +24,7 @@ class SelectionBatchCreateParams(BaseModel):
 
     @model_validator(mode='after')
     def validate_times(self) -> Self:
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         if self.begin_time <= now:
             raise ValueError('begin_time 必须是未来的时间')
         if self.end_time <= now:

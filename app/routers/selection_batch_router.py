@@ -25,7 +25,6 @@ MasterSlaveConnDep = Annotated[AsyncConnection, Depends(get_master_slave_connect
 
 @router.get('')
 async def get_selection_batch(cur_user: UserDep, master_slave_conn: MasterSlaveConnDep) -> SelectionBatchQueryResp:
-    await master_slave_conn.execute(text("SET time_zone = '+8:00'"))    # 设置成东八区
     if cur_user.role == 'admin':
         resp_result = [SelectionBatchResp(batch_id=row[0], name=row[1], begin_time=row[2], end_time=row[3], status=row[4]) for row in (await master_slave_conn.execute(text(
             'SELECT id, name, begin_time, end_time, CASE '

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Layout, Menu, Button, theme } from 'antd';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { UserOutlined, BookOutlined, LogoutOutlined, TeamOutlined } from '@ant-design/icons';
+import { UserOutlined, BookOutlined, LogoutOutlined, TeamOutlined, ClockCircleOutlined } from '@ant-design/icons';
 
 const { Header, Sider, Content } = Layout;
 
@@ -25,6 +25,7 @@ export const AppLayout: React.FC = () => {
         { key: '/admin/students', icon: <UserOutlined />, label: '学生管理' },
         { key: '/admin/teachers', icon: <TeamOutlined />, label: '教师管理' },
         { key: '/admin/courses', icon: <BookOutlined />, label: '课程管理' },
+        { key: '/admin/selection-batches', icon: <ClockCircleOutlined />, label: '批次管理' },
       );
     } else if (role === 'student') {
       items.push(

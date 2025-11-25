@@ -185,7 +185,6 @@ async def select_or_deselect_course(
         local_func: Callable[[AsyncConnection, AsyncConnection, int, int], Coroutine[Any, Any, None]],
         remote_path: Template
 ):
-    await master_slave_conn.execute(text("SET time_zone = '+8:00'"))    # 设置成东八区
     # stu_id参数为空，表示学生选退课，id从cur_user获取
     # stu_id非空，表示管理员帮学生选退课，id从stu_id获取
     if stu_id is None:
