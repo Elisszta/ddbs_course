@@ -3,13 +3,13 @@ from typing import Annotated, List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
+from starlette.responses import JSONResponse
 
-from app.models.course_model import CourseCreateParams
-from app.models.generic_error import err_user_exist
-from app.models.user_model import TeacherCreateParams, TeacherUpdateParams, TeacherSimpleResp
+from app.models.generic_error import GenericError
+from app.models.user_model import TeacherCreateParams, TeacherUpdateParams, TeacherResp, TeacherQueryResp
 from app.routers.dbprivate import shard_router, master_router
 from app.settings import settings
-from app.utils.auth import AdminTeacherDep, AdminDep
+from app.utils.auth import AdminDep
 from app.utils.database import get_master_slave_connection, get_shard_connection
 from app.utils.remote_call import remote_db_call
 
@@ -17,18 +17,21 @@ from app.utils.remote_call import remote_db_call
 MasterSlaveConnDep = Annotated[AsyncConnection, Depends(get_master_slave_connection)]
 ShardConnDep = Annotated[AsyncConnection, Depends(get_shard_connection)]
 
-router = APIRouter(prefix="/api/v1/teachers", tags=["Teacher"])
+router = APIRouter(prefix="/api/v1/teachers", tags=["Teacher"], responses={403: {'model': GenericError, 'description': 'Insufficient permission'}})
 
 
 # =================================================================
 # 1. 管理员添加教师 (Master写)
 # =================================================================
-@router.post("", status_code=201)
+@router.post("", status_code=201, responses={
+    409: {'model': GenericError, 'description': 'Teacher id conflict or full'},
+    502: {'model': GenericError, 'description': 'Remote not responding'}
+})
 async def add_teacher(
     conn: MasterSlaveConnDep, 
     teacher: TeacherCreateParams, 
     user: AdminDep
-):
+) -> TeacherResp:
     """
     管理员添加教师接口。
     
@@ -42,31 +45,33 @@ async def add_teacher(
                  包含 id, name, sex, age。
     :param user: 当前管理员用户 (AdminDep)。
                  鉴权依赖，确保只有管理员可以执行此操作。
-    :return: 成功消息 {"msg": "Teacher created"}。
+    :return: 完整的教师。
     """
     if settings.is_master():
         # 🌟 本地调用：复用 master_router 逻辑
         return await master_router.create_teacher_private(conn, teacher)
-    else:
-        # 远程转发
-        master_url = settings.campus_a_web_url
-        if not master_url:
-            raise HTTPException(status_code=500, detail="Master URL not configured")
-        
-        target_url = f"{master_url.rstrip('/')}/api-private/v1/teachers"
-        status, result = await remote_db_call(url=target_url, method="POST", json=teacher.model_dump())
-        
-        if status != 201:
-            detail = result.get('detail') if isinstance(result, dict) else str(result)
-            raise HTTPException(status_code=status or 500, detail=detail)
-            
-    return {"msg": "Teacher created"}
+    # 远程转发
+    master_url = settings.campus_a_web_url
+    if not master_url:
+        raise HTTPException(status_code=500, detail="Master URL not configured")
+
+    target_url = f"{master_url.rstrip('/')}/api-private/v1/teachers"
+    status, result = await remote_db_call(url=target_url, method="POST", json=teacher.model_dump())
+
+    if status != 201:
+        detail = result.get('detail') if isinstance(result, dict) else str(result)
+        raise HTTPException(status_code=status or 502, detail=detail)
+
+    return JSONResponse(status_code=status, content=result)
 
 
 # =================================================================
 # 2. 管理员删除教师 (Master写 + 广播清理 Shard)
 # =================================================================
-@router.delete("/{teacher_id}", status_code=204)
+@router.delete("/{teacher_id}", status_code=204, responses={
+    404: {'model': GenericError, 'description': 'Teacher does not exist'},
+    502: {'model': GenericError, 'description': 'Remote not responding'}
+})
 async def delete_teacher(
     teacher_id: int,
     conn: MasterSlaveConnDep,
@@ -114,7 +119,10 @@ async def delete_teacher(
 # =================================================================
 # 3. 管理员修改教师 (Master写)
 # =================================================================
-@router.put("/{teacher_id}", status_code=204)
+@router.put("/{teacher_id}", status_code=204, responses={
+    404: {'model': GenericError, 'description': 'Teacher does not exist'},
+    502: {'model': GenericError, 'description': 'Remote not responding'}
+})
 async def update_teacher(
     teacher_id: int, 
     teacher: TeacherUpdateParams, 
@@ -126,19 +134,18 @@ async def update_teacher(
     """
     if settings.is_master():
         # 本地调用
-        await master_router.update_teacher_private(conn, teacher_id, teacher)
-    else:
-        # 远程转发
-        master_url = settings.campus_a_web_url
-        if not master_url:
-            raise HTTPException(status_code=500, detail="Master URL not configured")
-        
-        target_url = f"{master_url.rstrip('/')}/api-private/v1/teachers/{teacher_id}"
-        status, result = await remote_db_call(url=target_url, method="PUT", json=teacher.model_dump(exclude_unset=True))
-        
-        if status != 204:
-            detail = result.get('detail') if isinstance(result, dict) else str(result)
-            raise HTTPException(status_code=status or 500, detail=detail)
+        return await master_router.update_teacher_private(conn, teacher_id, teacher)
+    # 远程转发
+    master_url = settings.campus_a_web_url
+    if not master_url:
+        raise HTTPException(status_code=500, detail="Master URL not configured")
+
+    target_url = f"{master_url.rstrip('/')}/api-private/v1/teachers/{teacher_id}"
+    status, result = await remote_db_call(url=target_url, method="PUT", json=teacher.model_dump(exclude_unset=True))
+
+    if status != 204:
+        detail = result.get('detail') if isinstance(result, dict) else str(result)
+        raise HTTPException(status_code=status or 502, detail=detail)
             
     return None
 
@@ -146,20 +153,20 @@ async def update_teacher(
 # =================================================================
 # 5. 简单搜索 (Search) - 返回 ID 和 名字
 # =================================================================
-@router.get("/search", response_model=List[TeacherSimpleResp])
+@router.get("")
 async def search_teacher(
     conn: MasterSlaveConnDep, 
     user: AdminDep,
     id: int | None = None,
     name: str | None = None
-):
+) -> TeacherQueryResp:
     """
     简单查询教师 (用于前端下拉框等)。
     """
     if id is None and name is None:
-        return []
+        return TeacherQueryResp(total=0, result=[])
 
-    sql = "SELECT id, name FROM teacher WHERE 1=1"
+    sql = "SELECT id, name, sex, age FROM teacher WHERE 1=1"
     params = {}
 
     if id is not None:
@@ -170,10 +177,10 @@ async def search_teacher(
         sql += " AND name LIKE :name"
         params["name"] = f"%{name}%"
 
-    sql += " LIMIT 20"
+    # sql += " LIMIT 20"
     rows = (await conn.execute(text(sql), params)).all()
-    
-    return [TeacherSimpleResp(id=row.id, name=row.name) for row in rows]
+    resp_result = [TeacherResp(teacher_id=row.id, name=row.name, sex=row.sex, age=row.age) for row in rows]
+    return TeacherQueryResp(total=len(rows), result=resp_result)
 
 
 # # =================================================================

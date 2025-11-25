@@ -20,21 +20,8 @@ class UserLoginResp(BaseModel):
     username: str
 
 
-class StudentResp(BaseModel):
-    stu_id: int
-    name: str
-    sex: Literal['M', 'F']
-    age: int
-    current_campus: Literal['A', 'B', 'C']
-
-
-class StudentQueryResp(BaseModel):
-    total: int
-    result: list[StudentResp]
-
-
 class StudentCreateParams(BaseModel):
-    id: int
+    year: int
     name: str
     sex: Literal['M', 'F']
     age: int
@@ -48,13 +35,21 @@ class StudentUpdateParams(BaseModel):
     current_campus: Optional[Literal['A', 'B', 'C']] = None
 
 
-class StudentSimpleResp(BaseModel):
-    id: int
+class StudentResp(BaseModel):
+    stu_id: int
     name: str
+    sex: Literal['M', 'F']
+    age: int
+    current_campus: Literal['A', 'B', 'C']
+
+
+class StudentQueryResp(BaseModel):
+    total: int
+    result: list[StudentResp]
 
 
 class TeacherCreateParams(BaseModel):
-    id: int
+    year: int
     name: str
     sex: Literal['M', 'F']
     age: int
@@ -66,7 +61,13 @@ class TeacherUpdateParams(BaseModel):
     age: Optional[int] = None
 
 
-class TeacherSimpleResp(BaseModel):
-    id: int
+class TeacherResp(BaseModel):
+    teacher_id: int
     name: str
-    
+    sex: Literal['M', 'F']
+    age: int
+
+
+class TeacherQueryResp(BaseModel):
+    total: int
+    result: list[TeacherResp]
