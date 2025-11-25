@@ -60,7 +60,7 @@ async def delete_selection_batch(admin: AdminDep, master_slave_conn: MasterSlave
     if settings.is_master():
         await delete_selection_batch_private(master_slave_conn, batch_id)
         return
-    code, resp = await remote_db_call(settings.campus_a_web_url + f'{settings.campus_a_web_url.rstrip('/')}/api-private/v1/selection-batches/{batch_id}', method='DELETE')
+    code, resp = await remote_db_call(f"{settings.campus_a_web_url.rstrip('/')}/api-private/v1/selection-batches/{batch_id}", method='DELETE')
     if code != 204:
         detail = resp.get('detail') if isinstance(resp, dict) else str(resp)
         raise HTTPException(status_code=code or 502, detail=detail)

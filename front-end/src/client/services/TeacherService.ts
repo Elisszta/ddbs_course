@@ -3,7 +3,8 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { TeacherCreateParams } from '../models/TeacherCreateParams';
-import type { TeacherSimpleResp } from '../models/TeacherSimpleResp';
+import type { TeacherQueryResp } from '../models/TeacherQueryResp';
+import type { TeacherResp } from '../models/TeacherResp';
 import type { TeacherUpdateParams } from '../models/TeacherUpdateParams';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
@@ -23,20 +24,48 @@ export class TeacherService {
      * 包含 id, name, sex, age。
      * :param user: 当前管理员用户 (AdminDep)。
      * 鉴权依赖，确保只有管理员可以执行此操作。
-     * :return: 成功消息 {"msg": "Teacher created"}。
+     * :return: 完整的教师。
      * @param requestBody
-     * @returns any Successful Response
+     * @returns TeacherResp Successful Response
      * @throws ApiError
      */
     public static addTeacherApiV1TeachersPost(
         requestBody: TeacherCreateParams,
-    ): CancelablePromise<any> {
+    ): CancelablePromise<TeacherResp> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/teachers',
             body: requestBody,
             mediaType: 'application/json',
             errors: {
+                403: `Insufficient permission`,
+                409: `Teacher id conflict or full`,
+                422: `Validation Error`,
+                502: `Remote not responding`,
+            },
+        });
+    }
+    /**
+     * Search Teacher
+     * 简单查询教师 (用于前端下拉框等)。
+     * @param id
+     * @param name
+     * @returns TeacherQueryResp Successful Response
+     * @throws ApiError
+     */
+    public static searchTeacherApiV1TeachersGet(
+        id?: (number | null),
+        name?: (string | null),
+    ): CancelablePromise<TeacherQueryResp> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/teachers',
+            query: {
+                'id': id,
+                'name': name,
+            },
+            errors: {
+                403: `Insufficient permission`,
                 422: `Validation Error`,
             },
         });
@@ -61,7 +90,10 @@ export class TeacherService {
                 'teacher_id': teacherId,
             },
             errors: {
+                403: `Insufficient permission`,
+                404: `Teacher does not exist`,
                 422: `Validation Error`,
+                502: `Remote not responding`,
             },
         });
     }
@@ -86,31 +118,10 @@ export class TeacherService {
             body: requestBody,
             mediaType: 'application/json',
             errors: {
+                403: `Insufficient permission`,
+                404: `Teacher does not exist`,
                 422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Search Teacher
-     * 简单查询教师 (用于前端下拉框等)。
-     * @param id
-     * @param name
-     * @returns TeacherSimpleResp Successful Response
-     * @throws ApiError
-     */
-    public static searchTeacherApiV1TeachersSearchGet(
-        id?: (number | null),
-        name?: (string | null),
-    ): CancelablePromise<Array<TeacherSimpleResp>> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/v1/teachers/search',
-            query: {
-                'id': id,
-                'name': name,
-            },
-            errors: {
-                422: `Validation Error`,
+                502: `Remote not responding`,
             },
         });
     }

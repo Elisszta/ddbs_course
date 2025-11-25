@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 export type StudentCreateParams = {
-    id: number;
+    year: number;
     name: string;
     sex: StudentCreateParams.sex;
     age: number;

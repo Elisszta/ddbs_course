@@ -5,8 +5,10 @@
 import type { SelectionBatchCreateParams } from '../models/SelectionBatchCreateParams';
 import type { SelectionBatchResp } from '../models/SelectionBatchResp';
 import type { StudentCreateParams } from '../models/StudentCreateParams';
+import type { StudentResp } from '../models/StudentResp';
 import type { StudentUpdateParams } from '../models/StudentUpdateParams';
 import type { TeacherCreateParams } from '../models/TeacherCreateParams';
+import type { TeacherResp } from '../models/TeacherResp';
 import type { TeacherUpdateParams } from '../models/TeacherUpdateParams';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
@@ -23,14 +25,14 @@ export class CrossSiteMasterDbPrivateApiService {
      * :param p: 学生创建参数模型 (StudentCreateParams)。
      * 包含 id, name, sex, age, current_campus 字段。
      * 会被 model_dump() 转换为字典，自动匹配 SQL 语句中的命名参数 (如 :name)。
-     * :return: JSON 响应，包含成功提示信息 {"msg": "success"}。
+     * :return: JSON 响应，完整的学生信息。
      * @param requestBody
-     * @returns any Successful Response
+     * @returns StudentResp Successful Response
      * @throws ApiError
      */
     public static createStudentPrivateApiPrivateV1StudentsPost(
         requestBody: StudentCreateParams,
-    ): CancelablePromise<any> {
+    ): CancelablePromise<StudentResp> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api-private/v1/students',
@@ -101,60 +103,19 @@ export class CrossSiteMasterDbPrivateApiService {
      * :param p: 教师创建参数模型 (TeacherCreateParams)。
      * 包含 id, name, sex, age 字段。
      * 会被 model_dump() 转换为字典，自动匹配 SQL 语句中的命名参数。
-     * :return: JSON 响应，包含成功提示信息 {"msg": "success"}。
+     * :return: JSON 响应，完整的教师信息。
      * @param requestBody
-     * @returns any Successful Response
+     * @returns TeacherResp Successful Response
      * @throws ApiError
      */
     public static createTeacherPrivateApiPrivateV1TeachersPost(
         requestBody: TeacherCreateParams,
-    ): CancelablePromise<any> {
+    ): CancelablePromise<TeacherResp> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api-private/v1/teachers',
             body: requestBody,
             mediaType: 'application/json',
-            errors: {
-                403: `Insufficient permission`,
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Create Selection Batch Private
-     * @param requestBody
-     * @returns SelectionBatchResp Successful Response
-     * @throws ApiError
-     */
-    public static createSelectionBatchPrivateApiPrivateV1SelectionBatchesPost(
-        requestBody: SelectionBatchCreateParams,
-    ): CancelablePromise<SelectionBatchResp> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api-private/v1/selection-batches',
-            body: requestBody,
-            mediaType: 'application/json',
-            errors: {
-                403: `Insufficient permission`,
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Delete Selection Batch Private
-     * @param batchId
-     * @returns void
-     * @throws ApiError
-     */
-    public static deleteSelectionBatchPrivateApiPrivateV1SelectionBatchesBatchIdDelete(
-        batchId: number,
-    ): CancelablePromise<void> {
-        return __request(OpenAPI, {
-            method: 'DELETE',
-            url: '/api-private/v1/selection-batches/{batch_id}',
-            path: {
-                'batch_id': batchId,
-            },
             errors: {
                 403: `Insufficient permission`,
                 422: `Validation Error`,
@@ -203,6 +164,47 @@ export class CrossSiteMasterDbPrivateApiService {
             },
             body: requestBody,
             mediaType: 'application/json',
+            errors: {
+                403: `Insufficient permission`,
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Create Selection Batch Private
+     * @param requestBody
+     * @returns SelectionBatchResp Successful Response
+     * @throws ApiError
+     */
+    public static createSelectionBatchPrivateApiPrivateV1SelectionBatchesPost(
+        requestBody: SelectionBatchCreateParams,
+    ): CancelablePromise<SelectionBatchResp> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api-private/v1/selection-batches',
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                403: `Insufficient permission`,
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Delete Selection Batch Private
+     * @param batchId
+     * @returns void
+     * @throws ApiError
+     */
+    public static deleteSelectionBatchPrivateApiPrivateV1SelectionBatchesBatchIdDelete(
+        batchId: number,
+    ): CancelablePromise<void> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api-private/v1/selection-batches/{batch_id}',
+            path: {
+                'batch_id': batchId,
+            },
             errors: {
                 403: `Insufficient permission`,
                 422: `Validation Error`,

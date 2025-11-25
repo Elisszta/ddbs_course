@@ -2,13 +2,13 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-export type TeacherCreateParams = {
-    year: number;
+export type TeacherResp = {
+    teacher_id: number;
     name: string;
-    sex: TeacherCreateParams.sex;
+    sex: TeacherResp.sex;
     age: number;
 };
-export namespace TeacherCreateParams {
+export namespace TeacherResp {
     export enum sex {
         M = 'M',
         F = 'F',

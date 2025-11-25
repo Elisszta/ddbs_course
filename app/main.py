@@ -52,28 +52,28 @@ async def login(master_slave_conn: Annotated[AsyncConnection, Depends(get_master
 # FOR TESTING
 # ================
 
-from app.models.user_login_model import CurUser
-from app.utils.auth import get_current_student, get_current_admin, get_current_user, get_current_admin_or_teacher
+# from app.models.user_login_model import CurUser
+# from app.utils.auth import get_current_student, get_current_admin, get_current_user, get_current_admin_or_teacher
 
-# 1. 伪造一个“全能管理员”
-async def mock_admin():
-    # role 必须是 admin
-    return CurUser(user_id=1020250001, role="admin")
+# # 1. 伪造一个“全能管理员”
+# async def mock_admin():
+#     # role 必须是 admin
+#     return CurUser(user_id=1020250001, role="admin")
 
-# 2. 伪造一个“普通学生”
-async def mock_student():
-    # role 必须是 student
-    return CurUser(user_id=1120250001, role="student")
+# # 2. 伪造一个“普通学生”
+# async def mock_student():
+#     # role 必须是 student
+#     return CurUser(user_id=1120250001, role="student")
 
-# 3. 伪造一个“教师”
-async def mock_teacher():
-    return CurUser(user_id=1020251100, role="teacher")
+# # 3. 伪造一个“教师”
+# async def mock_teacher():
+#     return CurUser(user_id=1020251100, role="teacher")
 
-# 4. 启用覆盖！
-# 注意：这里的中括号里必须填函数名，不能填 StudentDep/AdminDep
-app.dependency_overrides[get_current_admin] = mock_admin
-# app.dependency_overrides[get_current_student] = mock_student
-# app.dependency_overrides[get_current_admin_or_teacher] = mock_teacher
-# app.dependency_overrides[get_current_user] = mock_student # 通用兜底
+# # 4. 启用覆盖！
+# # 注意：这里的中括号里必须填函数名，不能填 StudentDep/AdminDep
+# app.dependency_overrides[get_current_admin] = mock_admin
+# # app.dependency_overrides[get_current_student] = mock_student
+# # app.dependency_overrides[get_current_admin_or_teacher] = mock_teacher
+# # app.dependency_overrides[get_current_user] = mock_student # 通用兜底
 
-print("\n测试模式已启动：身份验证被 Mock 覆盖\n")
+# print("\n测试模式已启动：身份验证被 Mock 覆盖\n")

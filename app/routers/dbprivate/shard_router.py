@@ -110,6 +110,8 @@ async def get_course_students_private(master_slave_conn: MasterSlaveConnDep, sha
         raise HTTPException(status_code=404, detail=err_course_not_exist)
     # 直接把学生id弄过去，伪连接查询
     stu_ids = (await shard_conn.execute(text('SELECT sid FROM learn WHERE cid = :cid'), {'cid': course_id})).scalars().all()
+    if not stu_ids:
+        return StudentQueryResp(total=0, result=[])
     students = (await master_slave_conn.execute(text(f"SELECT id, name, sex, age, current_campus FROM student WHERE id IN ({','.join([str(stu_id) for stu_id in stu_ids])})"))).all()
     resp_result = [StudentResp(stu_id=row[0], name=row[1], sex=row[2], age=row[3], current_campus=row[4]) for row in students]
     return StudentQueryResp(total=len(resp_result), result=resp_result)
@@ -184,6 +186,7 @@ async def query_courses_private(
     if only_selected and stu_id is None:
         raise HTTPException(status_code=422, detail='"stu_id" is required when "only_selected" is True')
     # 使用半连接策略，但主从复制库用临时表的后果不可预知，因此使用IN语句伪半连接
+    await shard_conn.execute(text('DROP TEMPORARY TABLE IF EXISTS tmp_tid_name'))
     await shard_conn.execute(text('CREATE TEMPORARY TABLE tmp_tid_name (tid INT NOT NULL, name VARCHAR(255) NOT NULL)'))    # 该临时表应该是小表（驱动表），所以不建索引
     if course is None and teacher is None and not only_not_full and not only_selected:
         # 啥条件都没限定的查询
@@ -195,6 +198,7 @@ async def query_courses_private(
         if join_sql is None:
             await shard_conn.execute(text('DROP TABLE tmp_tid_name'))   # clean up
             return CourseQueryResp(total=0, result=[])
+        await shard_conn.execute(text('DROP TEMPORARY TABLE IF EXISTS tmp_cid_tid'))
         await shard_conn.execute(text('CREATE TEMPORARY TABLE tmp_cid_tid (cid INT NOT NULL, tid INT NOT NULL, INDEX idx_cid (cid), INDEX idx_tid (tid))'))
         await shard_conn.execute(text(f'INSERT INTO tmp_cid_tid (cid, tid) SELECT tmp.id, t.tid FROM (SELECT c.id FROM course c {join_sql} WHERE {where_sql}) tmp JOIN teach t ON tmp.id = t.cid'), params)
         distinct_teachers_id = (await shard_conn.execute(text('SELECT DISTINCT tid FROM tmp_cid_tid'))).scalars().all()

@@ -3,7 +3,8 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { StudentCreateParams } from '../models/StudentCreateParams';
-import type { StudentSimpleResp } from '../models/StudentSimpleResp';
+import type { StudentQueryResp } from '../models/StudentQueryResp';
+import type { StudentResp } from '../models/StudentResp';
 import type { StudentUpdateParams } from '../models/StudentUpdateParams';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
@@ -21,20 +22,52 @@ export class StudentService {
      * 包含 id, name, sex, age, current_campus。
      * :param user: 当前管理员用户 (AdminDep)。
      * 鉴权依赖，保证只有管理员角色可调用此接口。
-     * :return: 成功消息 {"msg": "Student created"}。
+     * :return: 完整的学生。
      * @param requestBody
-     * @returns any Successful Response
+     * @returns StudentResp Successful Response
      * @throws ApiError
      */
     public static addStudentApiV1StudentsPost(
         requestBody: StudentCreateParams,
-    ): CancelablePromise<any> {
+    ): CancelablePromise<StudentResp> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/students',
             body: requestBody,
             mediaType: 'application/json',
             errors: {
+                403: `Insufficient permission`,
+                409: `Student id conflict or full`,
+                422: `Validation Error`,
+                502: `Remote not responding`,
+            },
+        });
+    }
+    /**
+     * Search Student
+     * 查询学生信息 (只返回 ID 和 姓名)。
+     * - 如果提供 id：查对应的名字。
+     * - 如果提供 name：查对应的 ID (可能多个)。
+     * - 如果都不提供：返回空列表。
+     * 逻辑：直接读取本地数据库 (student表已同步)。
+     * @param id
+     * @param name
+     * @returns StudentQueryResp Successful Response
+     * @throws ApiError
+     */
+    public static searchStudentApiV1StudentsGet(
+        id?: (number | null),
+        name?: (string | null),
+    ): CancelablePromise<StudentQueryResp> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/students',
+            query: {
+                'id': id,
+                'name': name,
+            },
+            errors: {
+                403: `Insufficient permission`,
                 422: `Validation Error`,
             },
         });
@@ -57,7 +90,10 @@ export class StudentService {
                 'student_id': studentId,
             },
             errors: {
+                403: `Insufficient permission`,
+                404: `Student does not exist`,
                 422: `Validation Error`,
+                502: `Remote not responding`,
             },
         });
     }
@@ -82,35 +118,10 @@ export class StudentService {
             body: requestBody,
             mediaType: 'application/json',
             errors: {
+                403: `Insufficient permission`,
+                404: `Student does not exist`,
                 422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Search Student
-     * 查询学生信息 (只返回 ID 和 姓名)。
-     * - 如果提供 id：查对应的名字。
-     * - 如果提供 name：查对应的 ID (可能多个)。
-     * - 如果都不提供：返回空列表。
-     * 逻辑：直接读取本地数据库 (student表已同步)。
-     * @param id
-     * @param name
-     * @returns StudentSimpleResp Successful Response
-     * @throws ApiError
-     */
-    public static searchStudentApiV1StudentsSearchGet(
-        id?: (number | null),
-        name?: (string | null),
-    ): CancelablePromise<Array<StudentSimpleResp>> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/v1/students/search',
-            query: {
-                'id': id,
-                'name': name,
-            },
-            errors: {
-                422: `Validation Error`,
+                502: `Remote not responding`,
             },
         });
     }

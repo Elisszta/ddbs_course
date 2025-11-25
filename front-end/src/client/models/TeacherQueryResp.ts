@@ -2,8 +2,9 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-export type StudentSimpleResp = {
-    id: number;
-    name: string;
+import type { TeacherResp } from './TeacherResp';
+export type TeacherQueryResp = {
+    total: number;
+    result: Array<TeacherResp>;
 };
 
