@@ -104,21 +104,3 @@ npm run dev
 ```
 
 - 前端地址: http://localhost:3000
-
-## 5. 常见问题排查
-
-Q: 启动后端时报错 Table 'student' doesn't exist？
-
-A: 说明数据库初始化失败或连接到了错误的端口（如 3312）。请执行步骤 2 中的完全重置流程，并检查 .env.a 是否连接的是 3310。
-
-Q: 前端提示 CORS error？
-
-A: 检查后端 main.py 是否配置了 CORSMiddleware，以及前端 vite.config.ts 中的 proxy 配置是否正确指向了后端端口。
-
-Q: Slave 状态显示 Connecting？
-
-A: Docker 内部网络问题或 UUID 冲突。请务必使用 docker-compose down -v 清理旧卷。
-
-Q: 只有 3312 有数据，3310 没有？
-
-A: 你的 Python 程序连接错端口了。请执行 `unset DB_MASTER_SLAVE_31
