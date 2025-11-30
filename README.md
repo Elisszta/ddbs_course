@@ -58,6 +58,8 @@ docker-compose up -d
 - `DB_MASTER_SLAVE_URL`: 端口应为 3310 (Master)
 - `DB_SHARD_URL`: 端口应为 3320 (Shard A)
 
+同理，如上检查`env.b`, `env.c`。
+
 ### 3.2 安装依赖与启动服务
 
 ```
@@ -69,6 +71,8 @@ pip install -r requirements.txt
 
 # 运行启动脚本 (参数：校区 端口)
 ./start_campus.sh a 8000
+./start_campus.sh b 8001
+./start_campus.sh c 8002
 ```
 
 - API 文档: https://www.google.com/search?q=http://127.0.0.1:8000/docs
